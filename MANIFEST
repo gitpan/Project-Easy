@@ -1,0 +1,12 @@
+Changes
+lib/Project/Easy.pm
+lib/Project/Easy/Config.pm
+lib/Project/Easy/Daemon.pm
+lib/Project/Easy/DB.pm
+lib/Project/Easy/Distribution.pm
+lib/Project/Easy/Helper.pm
+Makefile.PL
+MANIFEST
+META.yml			Module meta-data (added by MakeMaker)
+README
+t/000-usage.t
