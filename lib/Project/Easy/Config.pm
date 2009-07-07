@@ -1,15 +1,18 @@
 package Project::Easy::Config;
 
-use strict;
+use Class::Easy;
 
 use JSON;
 
+sub patch ($$);
+
 sub parse {
-	my $class = shift;
-	my $core  = shift;
+	my $class  = shift;
+	my $core   = shift;
+	my $distro = shift;
 	
 	my $path  = $core->conf_path;
-	my $fixup = $core->fixup_path;
+	my $fixup = $core->fixup_path_distro ($distro);
 	
 	my $parser = JSON->new;
 	$parser->utf8 (1);

@@ -1,6 +1,6 @@
 package Project::Easy::DB;
 
-use strict;
+use Class::Easy;
 
 use DBI;
 

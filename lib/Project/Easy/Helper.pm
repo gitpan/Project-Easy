@@ -7,7 +7,7 @@ use IO::Easy;
 use File::Spec;
 my $FS = 'File::Spec';
 
-our @scriptable = (qw(check_state));
+our @scriptable = (qw(check_state config deploy shell db generate));
 
 sub ::initialize {
 	my $name_space = shift @ARGV;
@@ -22,15 +22,12 @@ sub ::initialize {
 	}
 	
 	my $project_template = "package $name_space;
-
 # \$Id\$
 
-use strict;
+use Class::Easy;
 
 use Project::Easy;
 use base qw(Project::Easy);
-
-use Class::Easy;
 
 has 'id', default => '${project_id}';
 has 'conf_format', default => 'json';
@@ -49,7 +46,7 @@ has 'db', default => sub {
 
 1;
 ";
-
+	
 	my $root = IO::Easy->new ('.');
 	
 	my $lib_dir = $root->append (@path)->as_dir;
@@ -64,7 +61,8 @@ has 'db', default => sub {
 	$bin->create;
 	foreach (@scriptable) {
 		my $script = $bin->append ($_)->as_file;
-		chmod 0755, $script->name;
+		warn "can't chmod " . $script->path
+			unless chmod 0755, $script->path;
 		$script->store_if_empty ("#!/usr/bin/perl
 use strict;
 use Project::Easy::Helper;
@@ -93,6 +91,10 @@ our \@paths = qw(
 	
 	my $distro = $var->append ('distribution')->as_file;
 	$distro->store_if_empty ('local');
+
+	my $t = $root->append ('t')->as_dir;
+	$t->create;
+
 }
 
 sub check_state {
@@ -100,6 +102,185 @@ sub check_state {
 	my ($pack, $libs) = &_script_wrapper;
 	
 	my $root = $pack->root;
+	
+	my $lib_dir = $root->append ('lib')->as_dir;
+	
+	my $includes = join ' ', map {"-I$_"} @$libs;
+	
+	my $files = [];
+	my $all_uses = {};
+	my $all_packs = {};
+	
+	$lib_dir->scan_tree (sub {
+		my $file = shift;
+		
+		return 1 if $file->type eq 'dir';
+		
+		if ($file =~ /\.pm$/) {
+			push @$files, $file;
+			my $content = $file->contents;
+
+			while ($content =~ m/^(use|package) ([^\$\;\s]+)/igms){
+				if ($1 eq 'use') {
+					$all_uses->{$2} = $file;
+				} else {
+					$all_packs->{$2} = $file;
+				}
+			}
+		}
+	});
+	
+	foreach (keys %$all_uses) {
+		delete $all_uses->{$_}
+			if /^[a-z][a-z0-9]+$/;
+	}
+	
+	my $failed   = {};
+	my $external = {};
+	
+	# here we try to find dependencies
+	foreach (keys %$all_uses) {
+		#warn "TRY TO USE: $_ : " . try_to_use ($_) . "\n"
+		#	if ! /^Rian\:\:/;
+		$external->{$_} = $all_uses->{$_}
+			unless exists $all_packs->{$_};
+		
+		$failed->{$_} = $all_uses->{$_}
+			if ! try_to_use ($_) and ! exists $all_packs->{$_};
+	}
+	
+	warn "external modules: ", join ' ', sort keys %$external;
+	
+	warn "requirements not satisfied. you must install these modules:\ncpan -i ",
+		join (' ', sort keys %$failed), "\n"
+			if scalar keys %$failed;
+	
+	foreach my $file (@$files) {
+		my $path = $file->rel_path ($root->path);
+
+		print `perl -c $includes $path`;
+		
+		my $res = $? >> 8;
+		if ($res == 0) {
+			# print $path, " … OK\n";
+		} elsif ($res == 255) {
+			print $path, " … DIED\n";
+			exit;
+		} else {
+			print $path, " … FAILED $res TESTS\n";
+			exit;
+		}
+	}
+
+	my $test_dir = $root->append ('t')->as_dir;
+	
+	
+	$test_dir->scan_tree (sub {
+		my $file = shift;
+		
+		return 1
+			if $file->type eq 'dir';
+		
+		if ($file =~ /\.(?:t|pl)$/) {
+			my $path = $file->rel_path;
+			
+			print `perl $includes $path`;
+			
+			my $res = $? >> 8;
+			if ($res == 0) {
+				print $path, " … OK\n";
+			} elsif ($res == 255) {
+				print $path, " … DIED\n";
+				exit;
+			} else {
+				print $path, " … FAILED $res TESTS\n";
+				exit;
+			}
+		}
+	});
+	
+	print "SUCCESS\n";
+	
+	return $pack;
+	
+}
+
+sub shell {
+	my ($pack, $libs) = &_script_wrapper;
+	
+	my $core = $pack->instance;
+	
+	my $distro = $ARGV[0];
+	
+	my $conf  = $core->config ($distro);
+	my $sconf = $conf->{shell};
+	
+	unless (try_to_use 'Net::SSH::Perl' and try_to_use 'Term::ReadKey') {
+		die "for remote shell you must install Net::SSH::Perl and Term::ReadKey packages";
+	}
+	
+	my %args = ();
+	foreach (qw(compression cipher port debug identity_files use_pty options protocol)) {
+		$args{$_} = $sconf->{$_}
+			if $sconf->{$_};
+	}
+	
+	$args{interactive} = 1;
+	
+	my $ssh = Net::SSH::Perl->new ($conf->{host}, %args);
+	$ssh->login ($sconf->{user});
+	
+	ReadMode('raw');
+	eval "END { ReadMode('restore') };";
+	$ssh->shell;
+
+}
+
+sub db {
+	my ($pack, $libs) = &_script_wrapper;
+	
+	my $root = $pack->root;
+	
+	my $config = $pack->config;
+	
+	
+}
+
+sub config {
+	
+	my ($pack, $libs) = &_script_wrapper;
+	
+	my $root = $pack->root;
+	
+	my $commands = {
+		add => {
+			database => {
+				'' => {
+					"global:opts" => {
+						RaiseError => 1,
+						AutoCommit => 1,
+						ShowErrorStatement => 1
+					},
+					"global:update" => "share/sql/__FIXME__.sql"
+				},
+				mysql => {
+					"local:dsn" => "DBI:mysql:database=__FIXME__",
+					"local:user" => "__FIXME__",
+					"local:pass" => "__FIXME__",
+					"global:dsn_suffix" => [
+						"mysql_multi_statements=1",
+						"mysql_enable_utf8=1",
+						"mysql_auto_reconnect=1",
+						"mysql_read_default_group=perl",
+						"mysql_read_default_file={$root}/etc/my.cnf"
+					],
+				}
+			},
+			daemon => {
+			
+			},
+		},
+	};
 	
 	my $lib_dir = $root->append ('lib')->as_dir;
 	
@@ -161,9 +342,13 @@ sub check_state {
 	
 }
 
+
 sub _script_wrapper {
-	my $local_conf = $0;
+	# because some calls dispatched to external scripts, but called from project dir
+	my $local_conf = shift || $0; 
 	my $lib_path;
+	
+	debug "called from $local_conf";
 	
 	if (exists $ENV{MOD_PERL_API_VERSION} and $ENV{MOD_PERL_API_VERSION} >= 2) {
 		use Apache2::ServerUtil;
@@ -174,7 +359,7 @@ sub _script_wrapper {
 		$lib_path   = "$server_root/lib";
 		
 	} else {
-		$local_conf =~ s/(.*)(^|\/)(cgi-)?bin\/.*/$1$2etc\/project-easy/si;
+		$local_conf =~ s/(.*)(^|\/)(?:cgi-bin|tools|bin)\/.*/$1$2etc\/project-easy/si;
 		$lib_path = "$1$2lib";
 	}
 	
@@ -182,14 +367,20 @@ sub _script_wrapper {
 		$lib_path = $FS->rel2abs ($lib_path);
 	}
 	
-	warn "local conf is: $local_conf, lib path is: ", join ', ', @LocalConf::paths, $lib_path;
+	$local_conf =~ s/etc\//conf\//
+		unless -f $local_conf;
+	
+	debug "local conf is: $local_conf, lib path is: ",
+		join (', ', @LocalConf::paths, $lib_path), "\n";
 	
 	require $local_conf;
 
 	push @INC, @LocalConf::paths, $lib_path;
 	
 	my $pack = $LocalConf::pack;
-
+	
+	debug "main project module is: $pack";
+	
 	eval "
 use $pack;
 use IO::Easy;
@@ -202,7 +393,8 @@ use DBI::Easy;
 		exit;
 	}
 	
-	return $pack, [@LocalConf::paths, $lib_path];
+	my @result = ($pack, [@LocalConf::paths, $lib_path]);
+	return @result;
 }
 
 

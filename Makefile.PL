@@ -9,5 +9,6 @@ WriteMakefile(
 		'IO::Easy'    => 0,
 		'Class::Easy' => 0,
 		'DBI::Easy'   => 0,
+		'JSON'        => 2.15,
 	}
 );

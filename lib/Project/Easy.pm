@@ -1,13 +1,13 @@
 package Project::Easy;
 
-# $Id: Easy.pm,v 1.4 2009/03/02 02:59:06 apla Exp $
+# $Id: Easy.pm,v 1.6 2009/07/07 19:46:54 apla Exp $
 
 use Class::Easy;
 use IO::Easy;
 
 use vars qw($VERSION);
 
-$VERSION = '0.01';
+$VERSION = '0.03';
 
 # because singletone
 our $instance = {};
@@ -19,8 +19,22 @@ sub instance {
 has 'daemons', default => {};
 
 has 'daemon_package', default => 'Project::Easy::Daemon';
-has 'db_package', default => 'Project::Easy::DB';
-has 'conf_package', default => 'Project::Easy::Config';
+has 'db_package',     default => 'Project::Easy::DB';
+has 'conf_package',   default => 'Project::Easy::Config';
+
+has 'etc', default => 'etc';
+has 'bin', default => 'bin';
+
+sub import {
+	my $pack = shift;
+	my @params = @_;
+	
+	if (scalar grep {$_ eq 'script'} @params) {
+		use Project::Easy::Helper;
+		($::pack, $::libs) = Project::Easy::Helper::_script_wrapper;
+		push @INC, @$::libs;
+	}
+}
 
 sub init {
 	my $class = shift;
@@ -41,7 +55,6 @@ sub init {
 	my $db_package = $class->db_package;
 	try_to_use ($db_package);
 
-	
 	bless $instance, $class;
 	
 	$instance->{_initialized} = $class;
@@ -109,14 +122,14 @@ sub detect_environment {
 	
 	make_accessor ($class, 'distro', default => $distro);
 	
-	my $conf_path = $root->append ('etc', $class->id . '.' . $class->conf_format);
+	my $conf_path = $root->append ($class->etc, $class->id . '.' . $class->conf_format);
 	
 	die "can't locate generic config file at '$conf_path'"
 		unless -f $conf_path;
 	
 	make_accessor ($class, 'conf_path', default => $conf_path);
 	
-	my $fixup_path = $root->append ('etc', $distro, $class->id . '.' . $class->conf_format);
+	my $fixup_path = $root->append ($class->etc, $distro, $class->id . '.' . $class->conf_format);
 	
 	die "can't locate fixup config file at '$fixup_path'"
 		unless -f $fixup_path;
@@ -125,7 +138,14 @@ sub detect_environment {
 	
 }
 
-sub get_daemon {
+sub fixup_path_distro {
+	my $self   = shift;
+	my $distro = shift || $self->distro;
+	
+	$self->root->append ($self->etc, $distro, $self->id . '.' . $self->conf_format)
+}
+
+sub daemon {
 	my $core = shift;
 	my $code = shift;
 	
@@ -134,6 +154,12 @@ sub get_daemon {
 
 sub config {
 	my $class = shift;
+	
+	if (@_ > 0) { # get config for another distro, do not cache
+		return $class->conf_package->parse (
+			$instance, @_
+		);
+	}
 	
 	unless ($instance->{config}) {
 		$instance->{config} = $class->conf_package->parse (

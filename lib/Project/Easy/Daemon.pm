@@ -1,7 +1,5 @@
 package Project::Easy::Daemon;
 
-use strict;
-
 use Class::Easy;
 
 has 'pid_file';
