@@ -3,6 +3,7 @@ package Project::Easy::Helper;
 use Class::Easy;
 
 use IO::Easy;
+use IO::Easy::File;
 
 use File::Spec;
 my $FS = 'File::Spec';
@@ -21,31 +22,14 @@ sub ::initialize {
 		die "please specify package namespace";
 	}
 	
-	my $project_template = "package $name_space;
-# \$Id\$
-
-use Class::Easy;
-
-use Project::Easy;
-use base qw(Project::Easy);
-
-has 'id', default => '${project_id}';
-has 'conf_format', default => 'json';
-
-my \$class = __PACKAGE__;
-
-has 'entity_prefix', default => join '::', \$class, 'Entity', '';
-
-\$class->init;
-
-# TODO: check why Project::Easy isn't provide db method
-has 'db', default => sub {
-	shift;
-	return \$class->SUPER::db (\@_);
-};
-
-1;
-";
+	my $project_template = IO::Easy::File::__data__files->{'Project.pm'};
+	
+	my $data = {
+		name_space => $name_space,
+		project_id => $project_id,
+	};
+	
+	$project_template =~ s/\{\$(\w+)\}/$data->{$1}/g;
 	
 	my $root = IO::Easy->new ('.');
 	
@@ -61,12 +45,14 @@ has 'db', default => sub {
 	$bin->create;
 	foreach (@scriptable) {
 		my $script = $bin->append ($_)->as_file;
-		warn "can't chmod " . $script->path
-			unless chmod 0755, $script->path;
 		$script->store_if_empty ("#!/usr/bin/perl
 use strict;
 use Project::Easy::Helper;
 \&Project::Easy::Helper::$_;");
+		
+		warn  "can't chmod " . $script->path
+			unless chmod 0755, $script->path;
+		
 	}
 	
 	# ok, project skeleton created. now we need to create config
@@ -95,6 +81,24 @@ our \@paths = qw(
 	my $t = $root->append ('t')->as_dir;
 	$t->create;
 
+}
+
+sub run_script {
+	my $script = shift;
+	my $path   = shift;
+	
+	print `$script`;
+	
+	my $res = $? >> 8;
+	if ($res == 0) {
+		# print $path, " … OK\n";
+	} elsif ($res == 255) {
+		print $path, " … DIED\n";
+		exit;
+	} else {
+		print $path, " … FAILED $res TESTS\n";
+		exit;
+	}
 }
 
 sub check_state {
@@ -157,23 +161,12 @@ sub check_state {
 	
 	foreach my $file (@$files) {
 		my $path = $file->rel_path ($root->path);
-
-		print `perl -c $includes $path`;
 		
-		my $res = $? >> 8;
-		if ($res == 0) {
-			# print $path, " … OK\n";
-		} elsif ($res == 255) {
-			print $path, " … DIED\n";
-			exit;
-		} else {
-			print $path, " … FAILED $res TESTS\n";
-			exit;
-		}
+		print run_script ("perl -c $includes $path", $path);
+		
 	}
 
 	my $test_dir = $root->append ('t')->as_dir;
-	
 	
 	$test_dir->scan_tree (sub {
 		my $file = shift;
@@ -184,18 +177,7 @@ sub check_state {
 		if ($file =~ /\.(?:t|pl)$/) {
 			my $path = $file->rel_path;
 			
-			print `perl $includes $path`;
-			
-			my $res = $? >> 8;
-			if ($res == 0) {
-				print $path, " … OK\n";
-			} elsif ($res == 255) {
-				print $path, " … DIED\n";
-				exit;
-			} else {
-				print $path, " … FAILED $res TESTS\n";
-				exit;
-			}
+			print run_script ("perl $includes $path", $path);
 		}
 	});
 	
@@ -286,12 +268,12 @@ sub config {
 	
 	my $includes = join ' ', map {"-I$_"} @$libs;
 
-	$lib_dir->scan_tree (sub {
+	my $scan_handler = sub {
 		my $file = shift;
 		
 		return 1 if $file->type eq 'dir';
 		
-		if ($file =~ /\.pm$/) {
+		if ($file =~ /\.(?:pm|pl|t)$/) {
 			my $path = $file->rel_path ($root->path);
 
 			print `perl -c $includes $path`;
@@ -307,34 +289,13 @@ sub config {
 				exit;
 			}
 		}
-	});
+	};
+	
+	$lib_dir->scan_tree ($scan_handler);
 
 	my $test_dir = $root->append ('t')->as_dir;
 	
-	
-	$test_dir->scan_tree (sub {
-		my $file = shift;
-		
-		return 1
-			if $file->type eq 'dir';
-		
-		if ($file =~ /\.(?:t|pl)$/) {
-			my $path = $file->rel_path;
-			
-			print `perl $includes $path`;
-			
-			my $res = $? >> 8;
-			if ($res == 0) {
-				print $path, " … OK\n";
-			} elsif ($res == 255) {
-				print $path, " … DIED\n";
-				exit;
-			} else {
-				print $path, " … FAILED $res TESTS\n";
-				exit;
-			}
-		}
-	});
+	$test_dir->scan_tree ($scan_handler);
 	
 	print "SUCCESS\n";
 	
@@ -350,8 +311,11 @@ sub _script_wrapper {
 	
 	debug "called from $local_conf";
 	
-	if (exists $ENV{MOD_PERL_API_VERSION} and $ENV{MOD_PERL_API_VERSION} >= 2) {
-		use Apache2::ServerUtil;
+	if (
+		exists $ENV{MOD_PERL_API_VERSION}
+		and $ENV{MOD_PERL_API_VERSION} >= 2
+		and try_to_use ('Apache2::ServerUtil')
+	) {
 		
 		my $server_root = Apache2::ServerUtil::server_root();
 		
@@ -399,3 +363,39 @@ use DBI::Easy;
 
 
 1;
+
+
+__DATA__
+
+########################################
+# IO::Easy::File Project.pm
+########################################
+
+package {$name_space};
+# $Id$
+
+use Class::Easy;
+
+use Project::Easy;
+use base qw(Project::Easy);
+
+has 'id', default => '{$project_id}';
+has 'conf_format', default => 'json';
+
+my $class = __PACKAGE__;
+
+has 'entity_prefix', default => join '::', $class, 'Entity', '';
+
+$class->init;
+
+# TODO: check why Project::Easy isn't provide db method
+has 'db', default => sub {
+	shift;
+	return $class->SUPER::db (@_);
+};
+
+1;
+
+########################################
+# IO::Easy::File template
+########################################
