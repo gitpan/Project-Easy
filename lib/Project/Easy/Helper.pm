@@ -331,6 +331,7 @@ sub _script_wrapper {
 		$lib_path = $FS->rel2abs ($lib_path);
 	}
 	
+	# TODO: try other dirs
 	$local_conf =~ s/etc\//conf\//
 		unless -f $local_conf;
 	
@@ -372,7 +373,7 @@ __DATA__
 ########################################
 
 package {$name_space};
-# $Id$
+# $Id: Helper.pm,v 1.1 2009/07/20 18:00:08 apla Exp $
 
 use Class::Easy;
 

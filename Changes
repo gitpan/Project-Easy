@@ -1,3 +1,10 @@
+2009-09-25	Ivan Baktsheev <dot.and.thing@gmail.com>
+
+	Release 0.05
+
+	added ability to host fixup config outside of project root
+
+
 2009-02-11	Ivan Baktsheev <dot.and.thing@gmail.com>
 
 	Release 0.4

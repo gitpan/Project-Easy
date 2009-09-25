@@ -1,13 +1,15 @@
 package Project::Easy;
 
-# $Id: Easy.pm,v 1.6 2009/07/07 19:46:54 apla Exp $
+# $Id: Easy.pm,v 1.1 2009/07/20 18:00:09 apla Exp $
 
 use Class::Easy;
 use IO::Easy;
 
+use Project::Easy::Helper;
+
 use vars qw($VERSION);
 
-$VERSION = '0.04';
+$VERSION = '0.05';
 
 # because singletone
 our $instance = {};
@@ -30,7 +32,7 @@ sub import {
 	my @params = @_;
 	
 	if (scalar grep {$_ eq 'script'} @params) {
-		use Project::Easy::Helper;
+
 		($::pack, $::libs) = Project::Easy::Helper::_script_wrapper;
 		push @INC, @$::libs;
 	}
@@ -113,12 +115,14 @@ sub detect_environment {
 	make_accessor ($class, 'root', default => $root);
 
 	my $distro_path = $root->append ('var', 'distribution');
-	my $distro = $distro_path->as_file->contents;
+	my $distro_string = $distro_path->as_file->contents;
 	
-	chomp $distro;
+	chomp $distro_string;
+
+	die "can't recognise distribution '$distro_string'"
+		unless $distro_string;
 	
-	die "can't recognise distribution '$distro'"
-		unless $distro;
+	my ($distro, $fixup_core) = split (/:/, $distro_string, 2);
 	
 	make_accessor ($class, 'distro', default => $distro);
 	
@@ -129,7 +133,15 @@ sub detect_environment {
 	
 	make_accessor ($class, 'conf_path', default => $conf_path);
 	
-	my $fixup_path = $root->append ($class->etc, $distro, $class->id . '.' . $class->conf_format);
+	my $fixup_path;
+	
+	if ($fixup_core) {
+		$fixup_path = IO::Easy->new ($fixup_core)->append ($distro);
+	} else {
+		$fixup_path = $root->append ($class->etc, $distro, $fixup_core);
+	}
+	
+	$fixup_path = $fixup_path->append ($class->id . '.' . $class->conf_format);
 	
 	die "can't locate fixup config file at '$fixup_path'"
 		unless -f $fixup_path;

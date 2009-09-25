@@ -22,8 +22,8 @@ sub parse {
 	
 	# here we want to expand some generic params
 	my $expand = {
-		root => $core->root->path,
-		id   => $core->id,
+		root   => $core->root->path,
+		id     => $core->id,
 		distro => $core->distro,
 	};
 	
@@ -38,6 +38,18 @@ sub parse {
 	patch ($data, $data_alt);
 	
 	return $data;
+}
+
+sub string_from_template {
+	
+	my $template  = shift;
+	my $expansion = shift;
+	
+	foreach (keys %$expansion) {
+		$template =~ s/\{\$$_\}/$expansion->{$_}/sg;
+	}
+	
+	return $template;
 }
 
 sub patch ($$) {
