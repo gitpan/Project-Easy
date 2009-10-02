@@ -2,8 +2,6 @@ package Project::Easy::Config;
 
 use Class::Easy;
 
-use JSON;
-
 sub patch ($$);
 
 sub parse {
@@ -14,42 +12,55 @@ sub parse {
 	my $path  = $core->conf_path;
 	my $fixup = $core->fixup_path_distro ($distro);
 	
-	my $parser = JSON->new;
-	$parser->utf8 (1);
-	
-	my $conf = $path->as_file->contents;
-	my $alt  = $fixup->as_file->contents;
-	
 	# here we want to expand some generic params
-	my $expand = {
+	my $expansion = {
 		root   => $core->root->path,
 		id     => $core->id,
 		distro => $core->distro,
 	};
 	
-	foreach (keys %$expand) {
-		$conf =~ s/\{\$$_\}/$expand->{$_}/sg;
-		$alt  =~ s/\{\$$_\}/$expand->{$_}/sg;
-	}
+	my $conf = $path->deserialize ($expansion);
+	my $alt  = $fixup->deserialize ($expansion);
 	
-	my $data     = $parser->decode ($conf);
-	my $data_alt = $parser->decode ($alt);
+	patch ($conf, $alt);
 	
-	patch ($data, $data_alt);
+	return $conf;
+}
+
+my $ext_syn = {
+	'pl' => 'perl',
+	'js' => 'json',
+};
+
+sub serializer {
+	shift;
+	my $type = shift;
 	
-	return $data;
+	$type = $ext_syn->{$type}
+		if exists $ext_syn->{$type};
+	
+	my $pack = "Project::Easy::Config::Format::$type";
+	
+	die ('no such serializer: ', $type)
+		unless try_to_use ($pack);
+	
+	return $pack->new;
 }
 
 sub string_from_template {
-	
-	my $template  = shift;
-	my $expansion = shift;
-	
-	foreach (keys %$expansion) {
-		$template =~ s/\{\$$_\}/$expansion->{$_}/sg;
-	}
-	
-	return $template;
+
+    my $template  = shift;
+    my $expansion = shift;
+
+    return unless $template;
+
+    foreach (keys %$expansion) {
+        next unless defined $expansion->{$_};
+
+        $template =~ s/\{\$$_\}/$expansion->{$_}/sg;
+    }
+
+    return $template;
 }
 
 sub patch ($$) {
@@ -57,7 +68,12 @@ sub patch ($$) {
 	my $patch     = shift;
 	      
 	return if ref $struct ne 'HASH' and ref $patch ne 'HASH';
-	    
+
+    unless ( scalar keys %$struct ) {
+        %$struct = %$patch;
+        return;
+    }
+    
 	foreach my $k (keys %$patch) {
 		if (! exists $struct->{$k}) {
 			$struct->{$k} = $patch->{$k};

@@ -9,7 +9,7 @@ use Project::Easy::Helper;
 
 use vars qw($VERSION);
 
-$VERSION = '0.05';
+$VERSION = '0.06';
 
 # because singletone
 our $instance = {};
@@ -125,28 +125,23 @@ sub detect_environment {
 	my ($distro, $fixup_core) = split (/:/, $distro_string, 2);
 	
 	make_accessor ($class, 'distro', default => $distro);
+	make_accessor ($class, 'fixup_core', default => $fixup_core);
 	
-	my $conf_path = $root->append ($class->etc, $class->id . '.' . $class->conf_format);
+	try_to_use ('Project::Easy::Config::File');
+	
+	my $conf_path = $root->append ($class->etc, $class->id . '.' . $class->conf_format)->as_file;
 	
 	die "can't locate generic config file at '$conf_path'"
 		unless -f $conf_path;
 	
-	make_accessor ($class, 'conf_path', default => $conf_path);
+	make_accessor ($class, 'conf_path', default => bless ($conf_path, 'Project::Easy::Config::File'));
 	
-	my $fixup_path;
-	
-	if ($fixup_core) {
-		$fixup_path = IO::Easy->new ($fixup_core)->append ($distro);
-	} else {
-		$fixup_path = $root->append ($class->etc, $distro, $fixup_core);
-	}
-	
-	$fixup_path = $fixup_path->append ($class->id . '.' . $class->conf_format);
-	
+	my $fixup_path = $class->fixup_path_distro;
+
 	die "can't locate fixup config file at '$fixup_path'"
 		unless -f $fixup_path;
 	
-	make_accessor ($class, 'fixup_path', default => $fixup_path);
+	make_accessor ($class, 'fixup_path', default => bless ($fixup_path, 'Project::Easy::Config::File'));
 	
 }
 
@@ -154,7 +149,19 @@ sub fixup_path_distro {
 	my $self   = shift;
 	my $distro = shift || $self->distro;
 	
-	$self->root->append ($self->etc, $distro, $self->id . '.' . $self->conf_format)
+	my $fixup_core = $self->fixup_core;
+	
+	my $fixup_path;
+	
+	if ($fixup_core) {
+		$fixup_path = IO::Easy->new ($fixup_core)->append ($distro);
+	} else {
+		$fixup_path = $self->root->append ($self->etc, $distro, $fixup_core);
+	}
+	
+	$fixup_path = $fixup_path->append ($self->id . '.' . $self->conf_format)->as_file;
+	
+	return $fixup_path;
 }
 
 sub daemon {

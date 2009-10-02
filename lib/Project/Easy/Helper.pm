@@ -1,5 +1,7 @@
 package Project::Easy::Helper;
 
+use Data::Dumper;
+
 use Class::Easy;
 
 use IO::Easy;
@@ -40,15 +42,17 @@ sub ::initialize {
 	my $class_file = $lib_dir->append ($last)->as_file;
 	$class_file->store_if_empty ($project_template);
 	
-	# ok, project skeleton created. now we need to create config
+	# ok, project skeleton created. now we need to create 'bin' dir
 	my $bin = $root->append ('bin')->as_dir;
 	$bin->create;
+	
+	# now we create several perl scripts to complete installation 
 	foreach (@scriptable) {
 		my $script = $bin->append ($_)->as_file;
 		$script->store_if_empty ("#!/usr/bin/perl
 use strict;
 use Project::Easy::Helper;
-\&Project::Easy::Helper::$_;");
+\&Project::Easy::Helper::$_;\n");
 		
 		warn  "can't chmod " . $script->path
 			unless chmod 0755, $script->path;
@@ -229,75 +233,78 @@ sub db {
 }
 
 sub config {
-	
+
 	my ($pack, $libs) = &_script_wrapper;
 	
 	my $root = $pack->root;
+	my $core = $pack->instance;
 	
-	my $commands = {
-		add => {
-			database => {
-				'' => {
-					"global:opts" => {
-						RaiseError => 1,
-						AutoCommit => 1,
-						ShowErrorStatement => 1
-					},
-					"global:update" => "share/sql/__FIXME__.sql"
-				},
-				mysql => {
-					"local:dsn" => "DBI:mysql:database=__FIXME__",
-					"local:user" => "__FIXME__",
-					"local:pass" => "__FIXME__",
-					"global:dsn_suffix" => [
-						"mysql_multi_statements=1",
-						"mysql_enable_utf8=1",
-						"mysql_auto_reconnect=1",
-						"mysql_read_default_group=perl",
-						"mysql_read_default_file={$root}/etc/my.cnf"
-					],
-				}
-			},
-			daemon => {
-			
-			},
-		},
-	};
+	my $templates = IO::Easy::File::__data__files ();
 	
-	my $lib_dir = $root->append ('lib')->as_dir;
+	my $commands_json = $templates->{'config-params.json'};
 	
-	my $includes = join ' ', map {"-I$_"} @$libs;
+	my $conf_pack = $pack->conf_package;
+	my $commands  = $conf_pack->parse_string ($commands_json);
+	
+	my $usage_template = $templates->{'config-usage'};
+	
+	if ( scalar @ARGV < 2 ) {
+		warn "Insufficient required parameters!\n";
+		die $usage_template;
+	}
 
-	my $scan_handler = sub {
-		my $file = shift;
+	my ($command, @params) = @ARGV;
+	
+	my ($command_action, $command_target) = $command =~ /^--([a-z]+)-([a-z]+)$/;
+	
+	unless (
+		defined $command_action and defined $command_target
+		and exists $commands->{$command_action}
+		and ref $commands->{$command_action} eq 'HASH'
+		and exists $commands->{$command_action}->{$command_target}
+	) {
+		warn "Wrong command!\n";
+		die $usage_template;
+	}
+	
+	my ($db_driver, $db_name) = @params;
+	
+	unless ( exists $commands->{$command_action}{$command_target}{$db_driver} ) {
+		warn "Unknown database engine!\n";
+		warn "Currently support only these engines: ",
+			join (', ',
+				grep { !/^DEFAULTS$/ }
+					keys %{$commands->{$command_action}{$command_target}}
+				), "\n";
 		
-		return 1 if $file->type eq 'dir';
-		
-		if ($file =~ /\.(?:pm|pl|t)$/) {
-			my $path = $file->rel_path ($root->path);
-
-			print `perl -c $includes $path`;
-			
-			my $res = $? >> 8;
-			if ($res == 0) {
-				# print $path, " … OK\n";
-			} elsif ($res == 255) {
-				print $path, " … DIED\n";
-				exit;
-			} else {
-				print $path, " … FAILED $res TESTS\n";
-				exit;
-			}
-		}
-	};
+		die $usage_template;
+	}
 	
-	$lib_dir->scan_tree ($scan_handler);
-
-	my $test_dir = $root->append ('t')->as_dir;
+	my $distro = $core->distro;
 	
-	$test_dir->scan_tree ($scan_handler);
+	my $conf_path  = $core->conf_path->as_file;
+	#print "conf_path = $conf_path\n";
+	my $conf_fixup = $core->fixup_path_distro ($distro)->as_file;
+	#print "conf_fixup = $conf_fixup\n";
 	
-	print "SUCCESS\n";
+	my $conf  = $conf_pack->parse_string ($conf_path->contents);
+	my $fixup = $conf_pack->parse_string ($conf_fixup->contents);
+	
+	my $patch = $commands->{$command_action}{$command_target}{$db_driver};
+	my $patch_by_distribution = {};
+	
+	foreach my $config_option ( keys %$patch ) {
+		my ($distribution, $option) = split(/:/, $config_option);
+		$patch_by_distribution->{$distribution}{$db_driver}{$option} = $patch->{$config_option};
+	}
+	
+	#print Dumper($patch_by_distribution);
+	
+	Project::Easy::Config::patch($conf,  $patch_by_distribution->{global});
+	Project::Easy::Config::patch($fixup, $patch_by_distribution->{local});
+	
+	$conf_path->store ($conf_pack->json_encode($conf));
+	$conf_fixup->store ($conf_pack->json_encode($fixup));
 	
 	return $pack;
 	
@@ -331,7 +338,6 @@ sub _script_wrapper {
 		$lib_path = $FS->rel2abs ($lib_path);
 	}
 	
-	# TODO: try other dirs
 	$local_conf =~ s/etc\//conf\//
 		unless -f $local_conf;
 	
@@ -373,7 +379,7 @@ __DATA__
 ########################################
 
 package {$name_space};
-# $Id: Helper.pm,v 1.1 2009/07/20 18:00:08 apla Exp $
+# $Id: Helper.pm,v 1.9 2009/07/20 17:53:49 apla Exp $
 
 use Class::Easy;
 
@@ -400,3 +406,48 @@ has 'db', default => sub {
 ########################################
 # IO::Easy::File template
 ########################################
+
+
+########################################
+# IO::Easy::File config-params.json
+########################################
+
+{
+	"add": {
+		"database": {
+			"DEFAULTS": {
+				"global:opts": {
+					"RaiseError": 1,
+					"AutoCommit": 1,
+					"ShowErrorStatement": 1
+				},
+				"global:update": "share/sql/__FIXME__.sql"
+			},
+			"mysql": {
+				"local:dsn": "DBI:mysql:database=$db_name",
+				"local:user": "__FIXME__",
+				"local:pass": "__FIXME__",
+				"global:dsn_suffix": [
+					"mysql_multi_statements=1",
+					"mysql_enable_utf8=1",
+					"mysql_auto_reconnect=1",
+					"mysql_read_default_group=perl",
+					"mysql_read_default_file={$root}/etc/my.cnf"
+				]
+			},
+			"postgres": {
+				"local:dsn": "DBI:postgres:database=$db_name",
+				"local:user": "__FIXME__",
+				"local:pass": "__FIXME__"
+			}
+		},
+		"daemon": {
+		
+		}
+	}
+}
+
+########################################
+# IO::Easy::File config-usage
+########################################
+Usage: --add-database db_driver db_name
