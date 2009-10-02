@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Project-Easy
-version:            0.06
+version:            0.07
 abstract:           ~
 author:
     - Ivan Baktsheev <dot.and.thing@gmail.com>

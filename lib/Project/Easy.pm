@@ -9,7 +9,7 @@ use Project::Easy::Helper;
 
 use vars qw($VERSION);
 
-$VERSION = '0.06';
+$VERSION = '0.07';
 
 # because singletone
 our $instance = {};
@@ -134,14 +134,17 @@ sub detect_environment {
 	die "can't locate generic config file at '$conf_path'"
 		unless -f $conf_path;
 	
-	make_accessor ($class, 'conf_path', default => bless ($conf_path, 'Project::Easy::Config::File'));
+	# blessing for functionality extension: serializer
+	$conf_path = bless ($conf_path, 'Project::Easy::Config::File');
+	
+	make_accessor ($class, 'conf_path', default => $conf_path);
 	
 	my $fixup_path = $class->fixup_path_distro;
 
 	die "can't locate fixup config file at '$fixup_path'"
 		unless -f $fixup_path;
 	
-	make_accessor ($class, 'fixup_path', default => bless ($fixup_path, 'Project::Easy::Config::File'));
+	make_accessor ($class, 'fixup_path', default => $fixup_path);
 	
 }
 
@@ -161,7 +164,7 @@ sub fixup_path_distro {
 	
 	$fixup_path = $fixup_path->append ($self->id . '.' . $self->conf_format)->as_file;
 	
-	return $fixup_path;
+	bless ($fixup_path, 'Project::Easy::Config::File');
 }
 
 sub daemon {
