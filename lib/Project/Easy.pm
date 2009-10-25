@@ -9,7 +9,7 @@ use Project::Easy::Helper;
 
 use vars qw($VERSION);
 
-$VERSION = '0.07';
+$VERSION = '0.09';
 
 # because singletone
 our $instance = {};
@@ -259,11 +259,93 @@ Project::Easy - project deployment made easy.
 
 	$class->init;
 
+=head1 ACCESSORS
+
+=head2 singleton
+
+=over 4
+
+=item instance
+
+return class instance
+
+=cut 
+
+=head2 configurable options
+
+=over 4
+
+=item id
+
+project id
+
+=item conf_format
+
+default config file format
+
+=item daemon_package
+
+interface for daemon creation
+
+default => 'Project::Easy::Daemon'
+
+=item db_package
+
+interface for db connections creation
+
+default => 'Project::Easy::DB'
+
+=item conf_package
+
+configuration interface
+
+default => 'Project::Easy::Config';
+
+=item default configuration directory
+
+has 'etc', default => 'etc';
+
+=item default binary directory
+
+has 'bin', default => 'bin';
+
+=cut
+
+=head2 autodetect options
+
+=over 4
+
+=item root
+
+IO::Easy object for project root directory
+
+=item distro
+
+string contains current distribution name
+
+=item fixup_core
+
+path (string) to configuration fixup root
+
+=item conf_path
+
+path object to the global configuration file
+
+=item fixup_path
+
+path object to the local configuration file
+
+=cut
+
 =head1 METHODS
 
-=head2 new
+=head2 config
 
-TODO
+return configuration object
+
+=head2 db
+
+database pool
 
 =cut
 
@@ -274,7 +356,7 @@ Ivan Baktsheev, C<< <apla at the-singlers.us> >>
 =head1 BUGS
 
 Please report any bugs or feature requests to my email address,
-or through the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=DBI-Easy>. 
+or through the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Project-Easy>. 
 I will be notified, and then you'll automatically be notified
 of progress on your bug as I make changes.
 

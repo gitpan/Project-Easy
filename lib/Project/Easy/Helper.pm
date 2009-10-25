@@ -1,11 +1,11 @@
 package Project::Easy::Helper;
 
 use Data::Dumper;
-
 use Class::Easy;
-
 use IO::Easy;
 use IO::Easy::File;
+
+use Getopt::Long;
 
 use File::Spec;
 my $FS = 'File::Spec';
@@ -13,7 +13,11 @@ my $FS = 'File::Spec';
 our @scriptable = (qw(check_state config deploy shell db generate));
 
 sub ::initialize {
-	my $name_space = shift @ARGV;
+	my $params = \@_;
+	$params = \@ARGV
+		unless scalar @$params;
+	
+	my $name_space = shift @$params;
 
 	my @path = ('lib', split '::', $name_space);
 	my $last = pop @path;
@@ -234,80 +238,153 @@ sub db {
 
 sub config {
 
-	my ($pack, $libs) = &_script_wrapper;
+	my ($package, $libs) = &_script_wrapper; # Project name and "libs" path
 	
-	my $root = $pack->root;
-	my $core = $pack->instance;
+	my $root = $package->root;      # Absolute path to a project home
+	my $core = $package->instance;  # Project instance
 	
-	my $templates = IO::Easy::File::__data__files ();
-	
-	my $commands_json = $templates->{'config-params.json'};
-	
-	my $conf_pack = $pack->conf_package;
-	my $commands  = $conf_pack->parse_string ($commands_json);
-	
-	my $usage_template = $templates->{'config-usage'};
-	
-	if ( scalar @ARGV < 2 ) {
-		warn "Insufficient required parameters!\n";
-		die $usage_template;
-	}
+    my $config_package = $package->conf_package;        # Project::Easy::Config
 
-	my ($command, @params) = @ARGV;
+	my $templates = IO::Easy::File::__data__files ();   # Got all "data files" at end of file
 	
-	my ($command_action, $command_target) = $command =~ /^--([a-z]+)-([a-z]+)$/;
+    # Init serializer to parse config file
+    my $serializer_json = $config_package->serializer ('json');
+
+    # Global config absolute path
+	my $config_path  = $core->conf_path->as_file;
 	
-	unless (
-		defined $command_action and defined $command_target
-		and exists $commands->{$command_action}
-		and ref $commands->{$command_action} eq 'HASH'
-		and exists $commands->{$command_action}->{$command_target}
-	) {
-		warn "Wrong command!\n";
-		die $usage_template;
-	}
+    # Local config absolute path
+	my $local_config_path = $core->fixup_path_distro ($core->distro)->as_file;
 	
-	my ($db_driver, $db_name) = @params;
+    # Config now is a perl structure
+	my $config  = $serializer_json->parse_string ( $config_path->contents );
+    
+    # And this too
+    my $local_config  = $serializer_json->parse_string ( $local_config_path->contents );
+
+    # How to print structure of config: compact or recursive Dumper-like
+    my $recursive_dump = 0;
+    
+    GetOptions(
+        'dump'    => \$recursive_dump
+    );
+
+    if ( scalar @ARGV < 1 ) {
+        print $templates->{'config-usage'}, "\n";
+        return;
+    }
+    else {
+        my $config_key = $ARGV[0];
+        
+        my @key_parts = map { "{$_}" } split (/\./, $config_key);
+        
+        my $key = join '->', @key_parts; # $key = "{key1}->{key2}->{key3}..."
+        
+        if ( scalar @ARGV == 1 ) { # Print config key => value
+        
+            # Allow to "get" any key in configs: global and local
+            Project::Easy::Config::patch($config, $local_config);
+        
+            my $perl_config_key = '$config' . '->' . $key;
+
+            my $struct = eval $perl_config_key;
+        
+            # Check what kind of value we got: scalar or reference
+            if ( ref $struct ) {
+                
+                if ( $recursive_dump ) {
+                    print "$config_key => ", $serializer_json->dump_struct( $struct ), "\n";
+                }
+                else {
+                    if    ( ref $struct eq 'ARRAY' ) {
+                        print "Value is ARRAY with " . scalar @$struct . " elements\n";
+                    }
+                    elsif ( ref $struct eq 'HASH' ) {
+                        print "Value is HASH with keys: " . join (', ', keys %$struct) . "\n";
+                    }
+                    else {
+                        die 'Invalid struct';
+                    }
+                }
+            }
+            else {
+                print "$config_key => ", eval $perl_config_key, "\n";   
+            }
+        }
+        elsif ( scalar @ARGV == 3 ) { # Print config key => value
+            my $action = $ARGV[1];
+            #print Dumper($action, $new_value);
+            
+            if ( $action eq 'set'  ) { # Update key in configuration
+                my $new_value = $ARGV[2];
+                
+                # Local config only
+                my $perl_config_key = '$local_config' . '->' . $key;
+                
+                unless ( eval "exists $perl_config_key" ) {
+                    print "Error: can not modify non-existent key!\n\n";
+                    print $templates->{'config-usage'}, "\n";
+                    return;
+                }
+                
+                my $struct = eval $perl_config_key;
+            
+                unless ( ref $struct ) {
+                    my $operator = $perl_config_key . ' = $new_value';
+                    eval $operator; # DO here update of element
+                    
+                    # Store changes in local config
+                    $local_config_path->store ($serializer_json->dump_struct($local_config));
+                }
+                else {
+                    print "Error: can not update non-scalar element!\n\n";
+                    print $templates->{'config-usage'}, "\n";
+                    return;
+                }
+            }
+            elsif ( $action eq 'template' ) { # Update block of configuration
+                my $template_id = $ARGV[2];
+                
+                my ($new_config_section, $new_config_struct_key) = split /\./, $template_id;
+                
+                unless ( $new_config_section && $new_config_struct_key ) {
+                    print "Error: incorrect template format!\n\n";
+                    print $templates->{'config-usage'}, "\n";
+                    return;
+                }
+                
+                #print $templates->{'template-' . $template_id}, "\n";
+                my $database_id = $ARGV[0];
+        
+                my (undef, $db_id) = split (/\./, $database_id);
+                
+                my $template = $serializer_json->parse_string ( $templates->{'template-' . $template_id} );
+                my $patch_by_distribution = {};
+                
+                foreach my $config_option ( keys %$template ) {
+                    my ($distribution, $option) = split(/:/, $config_option);
+                    $patch_by_distribution->{$distribution}{db}{$db_id}{$option} = $template->{$config_option};
+                }
+                
+                Project::Easy::Config::patch($config,  $patch_by_distribution->{global});
+                Project::Easy::Config::patch($local_config, $patch_by_distribution->{local});
+                
+                $config_path->store ($serializer_json->dump_struct($config));
+                $local_config_path->store ($serializer_json->dump_struct($local_config));
+    
+                return;
+            }
+        }
+        else {
+            print $templates->{'config-usage'}, "\n";
+            return;
+        }
+
+    }
+    #print Dumper($config);
+    #print Dumper($local_config);
 	
-	unless ( exists $commands->{$command_action}{$command_target}{$db_driver} ) {
-		warn "Unknown database engine!\n";
-		warn "Currently support only these engines: ",
-			join (', ',
-				grep { !/^DEFAULTS$/ }
-					keys %{$commands->{$command_action}{$command_target}}
-				), "\n";
-		
-		die $usage_template;
-	}
-	
-	my $distro = $core->distro;
-	
-	my $conf_path  = $core->conf_path->as_file;
-	#print "conf_path = $conf_path\n";
-	my $conf_fixup = $core->fixup_path_distro ($distro)->as_file;
-	#print "conf_fixup = $conf_fixup\n";
-	
-	my $conf  = $conf_pack->parse_string ($conf_path->contents);
-	my $fixup = $conf_pack->parse_string ($conf_fixup->contents);
-	
-	my $patch = $commands->{$command_action}{$command_target}{$db_driver};
-	my $patch_by_distribution = {};
-	
-	foreach my $config_option ( keys %$patch ) {
-		my ($distribution, $option) = split(/:/, $config_option);
-		$patch_by_distribution->{$distribution}{$db_driver}{$option} = $patch->{$config_option};
-	}
-	
-	#print Dumper($patch_by_distribution);
-	
-	Project::Easy::Config::patch($conf,  $patch_by_distribution->{global});
-	Project::Easy::Config::patch($fixup, $patch_by_distribution->{local});
-	
-	$conf_path->store ($conf_pack->json_encode($conf));
-	$conf_fixup->store ($conf_pack->json_encode($fixup));
-	
-	return $pack;
-	
+    return $package;
 }
 
 
@@ -415,31 +492,31 @@ has 'db', default => sub {
 {
 	"add": {
 		"database": {
-			"DEFAULTS": {
-				"global:opts": {
-					"RaiseError": 1,
-					"AutoCommit": 1,
-					"ShowErrorStatement": 1
-				},
-				"global:update": "share/sql/__FIXME__.sql"
-			},
-			"mysql": {
-				"local:dsn": "DBI:mysql:database=$db_name",
-				"local:user": "__FIXME__",
-				"local:pass": "__FIXME__",
-				"global:dsn_suffix": [
-					"mysql_multi_statements=1",
-					"mysql_enable_utf8=1",
-					"mysql_auto_reconnect=1",
-					"mysql_read_default_group=perl",
-					"mysql_read_default_file={$root}/etc/my.cnf"
-				]
-			},
-			"postgres": {
-				"local:dsn": "DBI:postgres:database=$db_name",
-				"local:user": "__FIXME__",
-				"local:pass": "__FIXME__"
-			}
+            "DEFAULTS": {
+                "global:opts": {
+                    "RaiseError": 1,
+                    "AutoCommit": 1,
+                    "ShowErrorStatement": 1
+                },
+                "global:update": "share/sql/__FIXME__.sql"
+            },
+            "mysql": {
+                "local:dsn": "DBI:mysql:database=$db_name",
+                "local:user": "__FIXME__",
+                "local:pass": "__FIXME__",
+                "global:dsn_suffix": [
+                    "mysql_multi_statements=1",
+                    "mysql_enable_utf8=1",
+                    "mysql_auto_reconnect=1",
+                    "mysql_read_default_group=perl",
+                    "mysql_read_default_file={$root}/etc/my.cnf"
+                ]
+            },
+            "postgres": {
+                "local:dsn": "DBI:postgres:database=$db_name",
+                "local:user": "__FIXME__",
+                "local:pass": "__FIXME__"
+            }
 		},
 		"daemon": {
 		
@@ -450,4 +527,47 @@ has 'db', default => sub {
 ########################################
 # IO::Easy::File config-usage
 ########################################
-Usage: --add-database db_driver db_name
+
+Usage:  db.<database_id> template db.<template_name>    OR
+        db.<database_id>.username set "<password>"      OR
+        db.<database_id>.username
+
+Example (add new database config "local_test_db_id" with mysql template) :
+./bin/config db.local_test_db_id template db.mysql
+
+Example (change database config "local_test_db_id" from mysql to sqlite) :
+./bin/config db.local_test_db_id template db.sqlite
+
+########################################
+# IO::Easy::File template-db.mysql
+########################################
+
+{
+    "local:dsn": "DBI:mysql:database=$db_name",
+    "local:user": "__FIXME__",
+    "local:pass": "__FIXME__",
+    "global:dsn_suffix": [
+        "mysql_multi_statements=1",
+        "mysql_enable_utf8=1",
+        "mysql_auto_reconnect=1",
+        "mysql_read_default_group=perl",
+        "mysql_read_default_file={$root}/etc/my.cnf"
+    ]
+}
+
+########################################
+# IO::Easy::File template-db.default
+########################################
+
+{
+    "local:dsn": "DBI:mysql:database=$db_name",
+    "local:user": "__FIXME__",
+    "local:pass": "__FIXME__",
+    "global:dsn_suffix": [
+        "Xmysql_multi_statements=1",
+        "Xmysql_enable_utf8=1",
+        "Xmysql_auto_reconnect=1",
+        "Xmysql_read_default_group=perl",
+        "Xmysql_read_default_file={$root}/etc/my.cnf"
+    ]
+}

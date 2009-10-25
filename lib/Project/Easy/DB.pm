@@ -9,7 +9,7 @@ sub new {
 	my $project = shift;
 	my $db_code = shift;
 	
-	my $db_conf = $project->config->{"db$db_code"};
+	my $db_conf = $project->config->{db}->{default};
 	
 	my $dsn = $db_conf->{dsn};
 	
