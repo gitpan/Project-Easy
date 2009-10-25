@@ -9,7 +9,7 @@ use Project::Easy::Helper;
 
 use vars qw($VERSION);
 
-$VERSION = '0.09.01';
+$VERSION = '0.11';
 
 # because singletone
 our $instance = {};
