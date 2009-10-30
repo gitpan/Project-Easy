@@ -1,15 +1,11 @@
 package Project::Easy;
 
-# $Id: Easy.pm,v 1.1 2009/07/20 18:00:09 apla Exp $
-
 use Class::Easy;
 use IO::Easy;
 
 use Project::Easy::Helper;
 
-use vars qw($VERSION);
-
-$VERSION = '0.11';
+our $VERSION = '0.12';
 
 # because singletone
 our $instance = {};
@@ -56,12 +52,20 @@ sub init {
 
 	my $db_package = $class->db_package;
 	try_to_use ($db_package);
-
+	
 	bless $instance, $class;
 	
 	$instance->{_initialized} = $class;
 
 	my $config = $instance->config;
+
+	foreach my $db_id (keys %{$config->{db}}) {
+		next if $db_id eq 'default';
+		make_accessor ($class, "db_$db_id", default => sub {
+			my $class = shift;
+			return $class->db ($db_id);
+		});
+	}
 	
 	if (exists $config->{daemons}) {
 		
@@ -80,28 +84,68 @@ sub init {
 	return $instance;
 }
 
+sub _prepare_entity {
+	my $self = shift;
+	my $name = shift;
+
+	# TODO: check for entity in entity list before trim prefix
+	
+	my $qname      = DBI::Easy::Helper::package_from_table ($name);
+	my $table_name = DBI::Easy::Helper::table_from_package ($qname);
+	
+	my $db_prefix = '';
+	
+	foreach my $k (grep {!/^default$/} keys %{$self->config->{db}}) {
+		$db_prefix = (split /(?=\p{IsUpper}\p{IsLower})/, DBI::Easy::Helper::package_from_table ($k))[0];
+		$table_name = DBI::Easy::Helper::table_from_package (substr ($qname, length ($db_prefix)))
+			if index ($qname, $db_prefix) == 0;
+	}
+	
+	return ($qname, $table_name, $db_prefix);
+}
+
 sub entity {
 	my $self = shift;
 	my $name = shift;
 	
-	my $package = join '', $self->entity_prefix, $name;
+	my ($qname, $table_name, $db_prefix) = $self->_prepare_entity ($name);
 	
-	die "can't require $package"
-		unless try_to_use ($package);
+	my $entity_name  = $self->entity_prefix . $db_prefix . 'Record';
+	my $package_name = $self->entity_prefix . $db_prefix . $qname;
 	
-	return $package;
+	return $package_name
+		if try_to_use ($package_name);
+	
+	debug "virtual entity creation";
+	
+	DBI::Easy::Helper->r (
+		$qname,
+		prefix     => substr ($self->entity_prefix, 0, -2),
+		entity     => $entity_name,
+		table_name => $table_name,
+	);
 }
 
 sub collection {
 	my $self = shift;
 	my $name = shift;
 	
-	my $package = join '', $self->entity_prefix, $name, '::Collection';
+	my ($qname, $table_name, $db_prefix) = $self->_prepare_entity ($name);
 	
-	die "can't require $package"
-		unless try_to_use ($package);
+	my $entity_name  = $self->entity_prefix . $db_prefix . 'Collection';
+	my $package_name = $self->entity_prefix . $db_prefix . $qname . '::Collection';
 	
-	return $package;
+	return $package_name
+		if try_to_use ($package_name);
+	
+	debug "virtual entity creation";
+	
+	DBI::Easy::Helper->c (
+		$qname,
+		prefix     => substr ($self->entity_prefix, 0, -2),
+		entity     => $entity_name,
+		table_name => $table_name,
+	);
 }
 
 
@@ -178,9 +222,16 @@ sub config {
 	my $class = shift;
 	
 	if (@_ > 0) { # get config for another distro, do not cache
-		return $class->conf_package->parse (
+		my $config = $class->conf_package->parse (
 			$instance, @_
 		);
+		
+		# reparse config
+		if ($_[0] eq $class->distro) {
+			$instance->{config} = $config
+		}
+		
+		return $config
 	}
 	
 	unless ($instance->{config}) {
@@ -194,7 +245,7 @@ sub config {
 
 sub db {
 	my $class = shift;
-	my $type  = shift || '';
+	my $type  = shift || 'default';
 	
 	my $core = $class->instance; # fetch current process instance
 	
@@ -229,7 +280,6 @@ sub db {
 	}
 	
 	return $current_db->{$$};
-	
 	
 }
 
@@ -348,6 +398,83 @@ return configuration object
 database pool
 
 =cut
+
+=head1 ENTITIES
+
+=over 4
+
+=item intro
+
+Project::Easy create default entity classes on initialization.
+this entity based on default database connection. you can use
+this connection (not recommended) within modules by mantra:
+
+	my $core = <project_namespace>->instance;
+	my $dbh = $core->db;
+
+method db return default $dbh. you can use non-default dbh named 'cache' by calling:
+
+	my $dbh_cache = $core->db ('cache');
+
+or
+	my $dbh_cache = $core->db_cache;
+
+if DBI::Easy default API satisfy you, then you can use database entities
+by calling
+
+	my $account_record = $core->entity ('Account');
+	my $account_collection = $core->collection ('Account');
+	
+	my $all_accounts = $account_collection->new->list;
+
+in this case, virtual packages created for entity 'account'.
+
+or you can create these packages by hand:
+
+	package <project_namespace>::Entity::Account;
+	
+	use Class::Easy;
+	
+	use base qw(<project_namespace>::Entity::Record);
+	
+	1;
+
+and for collection:
+
+	package <project_namespace>::Entity::Account::Collection;
+
+	use Class::Easy;
+
+	use base qw(<project_namespace>::Entity::Collection);
+
+	1;
+
+in this case
+
+	my $account_record = $core->entity ('Account');
+	my $account_collection = $core->collection ('Account');
+	
+also works for you
+
+=cut 
+
+=item creation another database entity class
+
+TODO: creation by script
+
+=cut 
+
+=item using entities from multiple databases
+
+TODO: read database tables and create entity mappings,
+each entity subclass must contain converted database identifier:
+
+	default entity, table account_settings => entity AccountSettings
+	'cache' entity, table account_settings => entity CacheAccountSettings
+ 
+
+=cut 
+
 
 =head1 AUTHOR
 

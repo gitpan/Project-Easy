@@ -5,37 +5,45 @@ use Class::Easy;
 use IO::Easy;
 use IO::Easy::File;
 
-use Getopt::Long;
+use Time::Piece;
+
+use Project::Easy::Config;
+use Project::Easy::Helper::DB;
 
 use File::Spec;
 my $FS = 'File::Spec';
 
-our @scriptable = (qw(check_state config deploy shell db generate));
+our @scriptable = (qw(check_state config shell db updatedb));
 
 sub ::initialize {
 	my $params = \@_;
 	$params = \@ARGV
 		unless scalar @$params;
 	
-	my $name_space = shift @$params;
+	my $namespace = shift @$params;
 
-	my @path = ('lib', split '::', $name_space);
+	my @path = ('lib', split '::', $namespace);
 	my $last = pop @path;
 
 	my $project_id = shift @ARGV || lc ($last);
 	
-	unless ($name_space) {
+	unless ($namespace) {
 		die "please specify package namespace";
 	}
 	
-	my $project_template = IO::Easy::File::__data__files->{'Project.pm'};
+	my $data_files = IO::Easy::File::__data__files;
 	
 	my $data = {
-		name_space => $name_space,
+		namespace => $namespace,
 		project_id => $project_id,
 	};
 	
-	$project_template =~ s/\{\$(\w+)\}/$data->{$1}/g;
+	my $project_pm = Project::Easy::Config::string_from_template (
+		$data_files->{'Project.pm'},
+		$data
+	);
+	
+	my $distribution = 'local.' . scalar getpwuid ($<);
 	
 	my $root = IO::Easy->new ('.');
 	
@@ -44,7 +52,7 @@ sub ::initialize {
 	
 	$last .= '.pm';
 	my $class_file = $lib_dir->append ($last)->as_file;
-	$class_file->store_if_empty ($project_template);
+	$class_file->store_if_empty ($project_pm);
 	
 	# ok, project skeleton created. now we need to create 'bin' dir
 	my $bin = $root->append ('bin')->as_dir;
@@ -53,10 +61,13 @@ sub ::initialize {
 	# now we create several perl scripts to complete installation 
 	foreach (@scriptable) {
 		my $script = $bin->append ($_)->as_file;
-		$script->store_if_empty ("#!/usr/bin/perl
-use strict;
-use Project::Easy::Helper;
-\&Project::Easy::Helper::$_;\n");
+
+		my $script_contents = Project::Easy::Config::string_from_template (
+			$data_files->{'script.template'},
+			{script_name => $_}
+		);
+
+		$script->store_if_empty ($script_contents);
 		
 		warn  "can't chmod " . $script->path
 			unless chmod 0755, $script->path;
@@ -65,12 +76,15 @@ use Project::Easy::Helper;
 	
 	# ok, project skeleton created. now we need to create config
 	my $etc = $root->append ('etc')->as_dir;
-	$etc->append ('local')->as_dir->create;
+	$etc->append ($distribution)->as_dir->create;
+	
+	# TODO: store database config
 	$etc->append ("$project_id.json")->as_file->store_if_empty ('{}');
-	$etc->append ('local', "$project_id.json")->as_file->store_if_empty ('{}');
+	$etc->append ($distribution, "$project_id.json")->as_file->store_if_empty ('{}');
+	
 	$etc->append ('project-easy')->as_file->store_if_empty ("#!/usr/bin/perl
 package LocalConf;
-our \$pack = '$name_space';
+our \$pack = '$namespace';
 
 our \@paths = qw(
 );
@@ -84,11 +98,63 @@ our \@paths = qw(
 	}
 	
 	my $distro = $var->append ('distribution')->as_file;
-	$distro->store_if_empty ('local');
+	$distro->store_if_empty ($distribution);
 
 	my $t = $root->append ('t')->as_dir;
 	$t->create;
+	
+	my @namespace_chunks = split /\:\:/, $namespace;
+	
+	# here we must create default entity classes
+	my $project_lib = $root->append ('lib', @namespace_chunks, 'Entity');
+	$project_lib->as_dir->create;
 
+	my $entity_template = $data_files->{'Entity.pm'};
+
+	my $entity_pm = Project::Easy::Config::string_from_template (
+		$entity_template,
+		{
+			%$data,
+			scope => 'Record',
+			dbi_easy_scope => 'Record'
+		}
+	);
+
+	$project_lib->append ('Record.pm')->as_file->store ($entity_pm);
+
+	$entity_pm = Project::Easy::Config::string_from_template (
+		$entity_template,
+		{
+			%$data,
+			scope => 'Collection',
+			dbi_easy_scope => 'Record::Collection'
+		}
+	);
+
+	$project_lib->append ('Collection.pm')->as_file->store ($entity_pm);
+	
+	# adding sqlite database (sqlite is dependency for dbi::easy)
+	
+	my $date = localtime->ymd;
+	
+	my $schema_file = IO::Easy::File->new ('share/sql/default.sql');
+	$schema_file->updir->create;
+	$schema_file->store (
+		"--- $date\ncreate table var (var_name text, var_value text);\n"
+	);
+	
+	config (qw(db.default template db.sqlite));
+	config (qw(db.default.attributes.dbname = var/test.sqlite));
+	config (qw(db.default.update =), "$schema_file");
+	
+	$namespace->config ($distribution);
+	
+	update_schema (
+		mode => 'install'
+	);
+	
+	# TODO: be more user-friendly: show help after finish
+	
 }
 
 sub run_script {
@@ -226,165 +292,107 @@ sub shell {
 
 }
 
-sub db {
-	my ($pack, $libs) = &_script_wrapper;
-	
-	my $root = $pack->root;
-	
-	my $config = $pack->config;
-	
-	
-}
-
 sub config {
-
-	my ($package, $libs) = &_script_wrapper; # Project name and "libs" path
 	
-	my $root = $package->root;      # Absolute path to a project home
-	my $core = $package->instance;  # Project instance
+	my @params = @ARGV;
+	@params = @_
+		if scalar @_;
 	
-    my $config_package = $package->conf_package;        # Project::Easy::Config
-
+	my ($package, $libs) = &_script_wrapper(); # Project name and "libs" path
+	
+	my $core   = $package->instance;  # Project instance
+	my $config = $core->config;
+	
 	my $templates = IO::Easy::File::__data__files ();   # Got all "data files" at end of file
+
+	my ($key, $command, @remains) = @params;
 	
-    # Init serializer to parse config file
-    my $serializer_json = $config_package->serializer ('json');
-
-    # Global config absolute path
-	my $config_path  = $core->conf_path->as_file;
+	unless (defined $key) {
+		print $templates->{'config-usage'}, "\n";
+		return;
+	}
 	
-    # Local config absolute path
-	my $local_config_path = $core->fixup_path_distro ($core->distro)->as_file;
+	#  $key      = "key1.key2.key3..."
+	#  $key_eval = "{key1}->{key2}->{key3}..."
+	my $key_path = "{" . join ('}->{', split (/\./, $key)) . '}';
+	my $key_eval = "\$config->$key_path";
+
+	my $struct     = eval $key_eval;
+	my $ref_struct = ref $struct;
+
+	if (!defined $command or ($command eq 'dump' and !$ref_struct)) {
+		print "'$key' => ";
+		
+		if ($ref_struct eq 'HASH') {
+			print "HASH with keys: ", join ', ', keys %$struct;
+		
+		} elsif ($ref_struct eq 'ARRAY') {
+			print "ARRAY of ", scalar @$struct;
+		
+		} elsif (!$ref_struct) {
+			print "'", (defined $struct ? $struct : 'null'), "'";
+		}
+		print "\n";
+		return 1;
+	}
+
+	my $conf_package = $package->conf_package;		# Project::Easy::Config
+
+	# Init serializer to parse config file
+	my $serializer_json = $conf_package->serializer ('json');
 	
-    # Config now is a perl structure
-	my $config  = $serializer_json->parse_string ( $config_path->contents );
-    
-    # And this too
-    my $local_config  = $serializer_json->parse_string ( $local_config_path->contents );
-
-    # How to print structure of config: compact or recursive Dumper-like
-    my $recursive_dump = 0;
-    
-    GetOptions(
-        'dump'    => \$recursive_dump
-    );
-
-    if ( scalar @ARGV < 1 ) {
-        print $templates->{'config-usage'}, "\n";
-        return;
-    }
-    else {
-        my $config_key = $ARGV[0];
-        
-        my @key_parts = map { "{$_}" } split (/\./, $config_key);
-        
-        my $key = join '->', @key_parts; # $key = "{key1}->{key2}->{key3}..."
-        
-        if ( scalar @ARGV == 1 ) { # Print config key => value
-        
-            # Allow to "get" any key in configs: global and local
-            Project::Easy::Config::patch($config, $local_config);
-        
-            my $perl_config_key = '$config' . '->' . $key;
-
-            my $struct = eval $perl_config_key;
-        
-            # Check what kind of value we got: scalar or reference
-            if ( ref $struct ) {
-                
-                if ( $recursive_dump ) {
-                    print "$config_key => ", $serializer_json->dump_struct( $struct ), "\n";
-                }
-                else {
-                    if    ( ref $struct eq 'ARRAY' ) {
-                        print "Value is ARRAY with " . scalar @$struct . " elements\n";
-                    }
-                    elsif ( ref $struct eq 'HASH' ) {
-                        print "Value is HASH with keys: " . join (', ', keys %$struct) . "\n";
-                    }
-                    else {
-                        die 'Invalid struct';
-                    }
-                }
-            }
-            else {
-                print "$config_key => ", eval $perl_config_key, "\n";   
-            }
-        }
-        elsif ( scalar @ARGV == 3 ) { # Print config key => value
-            my $action = $ARGV[1];
-            #print Dumper($action, $new_value);
-            
-            if ( $action eq 'set'  ) { # Update key in configuration
-                my $new_value = $ARGV[2];
-                
-                # Local config only
-                my $perl_config_key = '$local_config' . '->' . $key;
-                
-                unless ( eval "exists $perl_config_key" ) {
-                    print "Error: can not modify non-existent key!\n\n";
-                    print $templates->{'config-usage'}, "\n";
-                    return;
-                }
-                
-                my $struct = eval $perl_config_key;
-            
-                unless ( ref $struct ) {
-                    my $operator = $perl_config_key . ' = $new_value';
-                    eval $operator; # DO here update of element
-                    
-                    # Store changes in local config
-                    $local_config_path->store ($serializer_json->dump_struct($local_config));
-                }
-                else {
-                    print "Error: can not update non-scalar element!\n\n";
-                    print $templates->{'config-usage'}, "\n";
-                    return;
-                }
-            }
-            elsif ( $action eq 'template' ) { # Update block of configuration
-                my $template_id = $ARGV[2];
-                
-                my ($new_config_section, $new_config_struct_key) = split /\./, $template_id;
-                
-                unless ( $new_config_section && $new_config_struct_key ) {
-                    print "Error: incorrect template format!\n\n";
-                    print $templates->{'config-usage'}, "\n";
-                    return;
-                }
-                
-                #print $templates->{'template-' . $template_id}, "\n";
-                my $database_id = $ARGV[0];
-        
-                my (undef, $db_id) = split (/\./, $database_id);
-                
-                my $template = $serializer_json->parse_string ( $templates->{'template-' . $template_id} );
-                my $patch_by_distribution = {};
-                
-                foreach my $config_option ( keys %$template ) {
-                    my ($distribution, $option) = split(/:/, $config_option);
-                    $patch_by_distribution->{$distribution}{db}{$db_id}{$option} = $template->{$config_option};
-                }
-                
-                Project::Easy::Config::patch($config,  $patch_by_distribution->{global});
-                Project::Easy::Config::patch($local_config, $patch_by_distribution->{local});
-                
-                $config_path->store ($serializer_json->dump_struct($config));
-                $local_config_path->store ($serializer_json->dump_struct($local_config));
-    
-                return;
-            }
-        }
-        else {
-            print $templates->{'config-usage'}, "\n";
-            return;
-        }
-
-    }
-    #print Dumper($config);
-    #print Dumper($local_config);
+	if ($command =~ /^(?:--)?dump$/) {
+		print "'$key' => ";
+		print $serializer_json->dump_struct ($struct);
+		print "\n";
+		return 1;
+	}
 	
-    return $package;
+	# set or = can: create new key (any depth), modify existing
+	# template can: create new key (any depth)
+	if ($command eq 'set' or $command eq '=' or $command eq 'template') {
+		
+		die "you must supply value for modify config"
+			unless scalar @remains;
+		
+		# check for legitimity
+		die "you cannot set/template complex value such as HASH/ARRAY. remove old key first"
+			if $ref_struct;
+		
+		die "you cannot update scalar value with template. remove old key first"
+			if $command eq 'template' and defined $struct; # any setter
+		
+		# patch creation for config files
+		
+		my $fixup_struct = {};
+		
+		if ($command eq 'template') {
+
+			my $template = $serializer_json->parse_string (
+				$templates->{'template-' . $remains[0]}
+			);
+			
+			eval "\$fixup_struct->$key_path = \$template";
+		} else {
+			eval "\$fixup_struct->$key_path = \$remains[0]";
+		}
+		
+		# storing modified config
+
+		# Global config absolute path
+		my $global_config_file = $core->conf_path;
+		$global_config_file->patch ($fixup_struct);
+
+		# Local config absolute path
+		my $local_config_file  = $core->fixup_path_distro ($core->distro);
+		$local_config_file->patch ($fixup_struct);
+		
+		return 1;
+	}
+
+	print $templates->{'config-usage'}, "\n";
+	
+	return;
 }
 
 
@@ -407,7 +415,7 @@ sub _script_wrapper {
 		$lib_path   = "$server_root/lib";
 		
 	} else {
-		$local_conf =~ s/(.*)(^|\/)(?:cgi-bin|tools|bin)\/.*/$1$2etc\/project-easy/si;
+		$local_conf =~ s/(.*)(^|\/)(?:t|cgi-bin|tools|bin)\/.*/$1$2etc\/project-easy/si;
 		$lib_path = "$1$2lib";
 	}
 	
@@ -455,7 +463,7 @@ __DATA__
 # IO::Easy::File Project.pm
 ########################################
 
-package {$name_space};
+package {$namespace};
 # $Id: Helper.pm,v 1.9 2009/07/20 17:53:49 apla Exp $
 
 use Class::Easy;
@@ -481,93 +489,103 @@ has 'db', default => sub {
 1;
 
 ########################################
+# IO::Easy::File script.template
+########################################
+
+#!/usr/bin/perl
+use strict;
+use Project::Easy::Helper;
+&Project::Easy::Helper::{$script_name};
+
+########################################
+# IO::Easy::File Entity.pm
+########################################
+
+package {$namespace}::Entity::{$scope};
+
+use Class::Easy;
+
+use base qw(DBI::Easy::{$dbi_easy_scope});
+
+our $wrapper = 1;
+
+sub _init_db {
+	my $self = shift;
+	
+	$self->dbh (\&{$namespace}::db);
+}
+
+1;
+
+########################################
 # IO::Easy::File template
 ########################################
 
 
 ########################################
-# IO::Easy::File config-params.json
-########################################
-
-{
-	"add": {
-		"database": {
-            "DEFAULTS": {
-                "global:opts": {
-                    "RaiseError": 1,
-                    "AutoCommit": 1,
-                    "ShowErrorStatement": 1
-                },
-                "global:update": "share/sql/__FIXME__.sql"
-            },
-            "mysql": {
-                "local:dsn": "DBI:mysql:database=$db_name",
-                "local:user": "__FIXME__",
-                "local:pass": "__FIXME__",
-                "global:dsn_suffix": [
-                    "mysql_multi_statements=1",
-                    "mysql_enable_utf8=1",
-                    "mysql_auto_reconnect=1",
-                    "mysql_read_default_group=perl",
-                    "mysql_read_default_file={$root}/etc/my.cnf"
-                ]
-            },
-            "postgres": {
-                "local:dsn": "DBI:postgres:database=$db_name",
-                "local:user": "__FIXME__",
-                "local:pass": "__FIXME__"
-            }
-		},
-		"daemon": {
-		
-		}
-	}
-}
-
-########################################
 # IO::Easy::File config-usage
 ########################################
 
-Usage:  db.<database_id> template db.<template_name>    OR
-        db.<database_id>.username set "<password>"      OR
-        db.<database_id>.username
+Usage:  db.<database_id> template db.<template_name>	OR
+		db.<database_id>.username set "<password>"	  OR
+		db.<database_id>.username
 
 Example (add new database config "local_test_db_id" with mysql template) :
 ./bin/config db.local_test_db_id template db.mysql
 
-Example (change database config "local_test_db_id" from mysql to sqlite) :
-./bin/config db.local_test_db_id template db.sqlite
+########################################
+# IO::Easy::File template-db.sqlite
+########################################
+
+{
+	"driver_name": "SQLite",
+	"attributes": {
+		"dbname" : null
+	},
+	"options": {
+		"RaiseError": 1,
+		"AutoCommit": 1,
+		"ShowErrorStatement": 1
+	}
+}
+
 
 ########################################
 # IO::Easy::File template-db.mysql
 ########################################
 
 {
-    "local:dsn": "DBI:mysql:database=$db_name",
-    "local:user": "__FIXME__",
-    "local:pass": "__FIXME__",
-    "global:dsn_suffix": [
-        "mysql_multi_statements=1",
-        "mysql_enable_utf8=1",
-        "mysql_auto_reconnect=1",
-        "mysql_read_default_group=perl",
-        "mysql_read_default_file={$root}/etc/my.cnf"
-    ]
+	"user": null,
+	"pass": null,
+	"driver_name": "mysql",
+	"attributes": {
+		"database" : null,
+		"mysql_multi_statements": 0,
+		"mysql_enable_utf8": 1,
+		"mysql_auto_reconnect": 1,
+		"mysql_read_default_group": "perl",
+		"mysql_read_default_file": "{$root}/etc/my.cnf"
+	},
+	"options": {
+		"RaiseError": 1,
+		"AutoCommit": 1,
+		"ShowErrorStatement": 1
+	}
 }
 
 ########################################
 # IO::Easy::File template-db.default
 ########################################
-
 {
-    "local:dsn": "DBI:mysql:database=$db_name",
-    "local:user": "__FIXME__",
-    "local:pass": "__FIXME__",
-    "global:dsn_suffix": [
-        "Xmysql_multi_statements=1",
-        "Xmysql_enable_utf8=1",
-        "Xmysql_auto_reconnect=1",
-        "Xmysql_read_default_group=perl",
-        "Xmysql_read_default_file={$root}/etc/my.cnf"
-    ]
+	"user": null,
+	"pass": null,
+	"driver_name": null, // mysql, oracle, pg, …
+	"attributes": {
+		"database" : null
+	},
+	"options": {
+		"RaiseError": 1,
+		"AutoCommit": 1,
+		"ShowErrorStatement": 1
+	}
 }

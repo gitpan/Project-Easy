@@ -9,9 +9,12 @@ lib/Project/Easy/Daemon.pm
 lib/Project/Easy/DB.pm
 lib/Project/Easy/Distribution.pm
 lib/Project/Easy/Helper.pm
+lib/Project/Easy/Helper/DB.pm
 Makefile.PL
 MANIFEST
 META.yml			Module meta-data (added by MakeMaker)
 README
 t/000-usage.t
 t/001-config.t
+t/002-helper-updatedb.t
+t/003-helper-initialize.t

@@ -7,27 +7,33 @@ use DBI;
 sub new {
 	my $class   = shift;
 	my $project = shift;
-	my $db_code = shift;
+	my $db_code = shift || 'default';
 	
-	my $db_conf = $project->config->{db}->{default};
+	my $db_conf = $project->config->{db}->{$db_code};
 	
-	my $dsn = $db_conf->{dsn};
+	die "db configuration: driver_name must be defined"
+		unless defined $db_conf->{driver_name};
+
+	my @connector = ('dbi', $db_conf->{driver_name});
 	
-	if (exists $db_conf->{dsn_suffix}) {
-		my $dsn_suffix = $db_conf->{dsn_suffix};
-		if (ref $dsn_suffix and ref $dsn_suffix eq 'ARRAY') {
-			$dsn = join ';', $dsn, @$dsn_suffix;
-		} else {
-			$dsn = join ';', $dsn, $dsn_suffix;
-		}
+	if (exists $db_conf->{attributes}) {
+		my %attrs = %{$db_conf->{attributes}};
+		push @connector, join ';', map {"$_=$attrs{$_}"} keys %attrs;
+	} elsif (exists $db_conf->{dsn_suffix}) {
+		die "db configuration: please use 'attributes' hash for setting dsn suffix string";
 	}
+	
+	my $dsn = join ':', @connector;
+	
+	die "db configuration: key name 'opts' must be changed to 'options'"
+		if exists $db_conf->{opts};
 	
 	# connect to db
 	my $dbh = DBI->connect (
 		$dsn,
 		$db_conf->{user},
 		$db_conf->{pass},
-		$db_conf->{opts},
+		$db_conf->{options},
 	);
 	
 	# $dbh->trace (1, join ('/', $auction->root, 'var', 'log', 'dbi_trace'));

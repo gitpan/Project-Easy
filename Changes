@@ -1,5 +1,12 @@
 2009-10-26	Ivan Baktsheev <dot.and.thing@gmail.com>
 
+	Release 0.12
+
+	database handling fixes
+	now we create default db connector after creating package
+
+2009-10-26	Ivan Baktsheev <dot.and.thing@gmail.com>
+
 	Release 0.11
 
 	project-easy script added to manifest
