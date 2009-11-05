@@ -122,7 +122,7 @@ sub update_schema {
 	
 	while (<SCHEMA>) {
 		
-		if ($_ =~ /-{2,}\s*(\d\d\d\d-\d\d-\d\d(?:\.\d+)?)/) {
+		if ($_ =~ /^-{2,}\s*(\d\d\d\d-\d\d-\d\d(?:\.\d+)?)/) {
 			if ($schema_version eq $1) {
 				# warn "we found latest declaration, start to find next declaration\n";
 				$found = 1;
@@ -157,7 +157,7 @@ sub update_schema {
 		@cleaning = ();
 	}
 	
-	if ($latest_version eq '' or $schema_version eq $latest_version) {
+	if (! defined $latest_version or $latest_version eq '' or $schema_version eq $latest_version) {
 		print "no updates, db schema version: $schema_version\n";
 		return;
 	}

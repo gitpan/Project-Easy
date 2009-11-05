@@ -27,6 +27,8 @@ sub ::initialize {
 
 	my $project_id = shift @ARGV || lc ($last);
 	
+	debug "initialization of $namespace, project id is: $project_id";
+	
 	unless ($namespace) {
 		die "please specify package namespace";
 	}
@@ -134,6 +136,10 @@ our \@paths = qw(
 	$project_lib->append ('Collection.pm')->as_file->store ($entity_pm);
 	
 	# adding sqlite database (sqlite is dependency for dbi::easy)
+	
+	debug "file contents saving done";
+	
+	$0 = IO::Easy::Dir->current->append (qw(etc project-easy))->path;
 	
 	my $date = localtime->ymd;
 	
@@ -414,6 +420,8 @@ sub _script_wrapper {
 		$local_conf = "$server_root/etc/project-easy";
 		$lib_path   = "$server_root/lib";
 		
+	} elsif ($local_conf =~ /etc\/project-easy$/) {
+		$lib_path = 'lib';
 	} else {
 		$local_conf =~ s/(.*)(^|\/)(?:t|cgi-bin|tools|bin)\/.*/$1$2etc\/project-easy/si;
 		$lib_path = "$1$2lib";

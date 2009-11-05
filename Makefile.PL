@@ -8,7 +8,7 @@ WriteMakefile(
 	EXE_FILES => ["bin/project-easy"],
 	PREREQ_PM => {
 		'IO::Easy'    => 0,
-		'Class::Easy' => 0,
+		'Class::Easy' => 0.05,
 		'DBI::Easy'   => 0,
 		'JSON'        => 2.15,
 	}

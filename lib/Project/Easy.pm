@@ -5,7 +5,7 @@ use IO::Easy;
 
 use Project::Easy::Helper;
 
-our $VERSION = '0.12';
+our $VERSION = '0.14';
 
 # because singletone
 our $instance = {};
@@ -114,7 +114,7 @@ sub entity {
 	my $package_name = $self->entity_prefix . $db_prefix . $qname;
 	
 	return $package_name
-		if try_to_use ($package_name);
+		if try_to_use_quiet ($package_name);
 	
 	debug "virtual entity creation";
 	
@@ -130,15 +130,18 @@ sub collection {
 	my $self = shift;
 	my $name = shift;
 	
+	# we must initialize entity prior to collection
+	$self->entity ($name);
+	
 	my ($qname, $table_name, $db_prefix) = $self->_prepare_entity ($name);
 	
 	my $entity_name  = $self->entity_prefix . $db_prefix . 'Collection';
 	my $package_name = $self->entity_prefix . $db_prefix . $qname . '::Collection';
 	
 	return $package_name
-		if try_to_use ($package_name);
+		if try_to_use_quiet ($package_name);
 	
-	debug "virtual entity creation";
+	debug "virtual collection creation";
 	
 	DBI::Easy::Helper->c (
 		$qname,

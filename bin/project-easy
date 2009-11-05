@@ -2,7 +2,7 @@
 
 use Class::Easy;
 
-use Project::Easy;
+use Project::Easy::Helper;
 
 ::initialize (@$ARGV);
 

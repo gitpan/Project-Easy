@@ -1,3 +1,17 @@
+2009-11-05	Ivan Baktsheev <dot.and.thing@gmail.com>
+
+	Release 0.14
+
+	fix for virtual collections; be quiet about virtual
+	
+2009-10-30	Ivan Baktsheev <dot.and.thing@gmail.com>
+
+	Release 0.13
+
+	support for virtual entities
+	
+	fix for project-easy script
+
 2009-10-26	Ivan Baktsheev <dot.and.thing@gmail.com>
 
 	Release 0.12

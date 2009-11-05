@@ -17,7 +17,58 @@ my $schema_file = IO::Easy::File->new ("schema.sql");
 
 unlink 'db.sqlite';
 
-my $dbh    = DBI->connect ("dbi:SQLite:db.sqlite");
+my $dbh = DBI->connect ("dbi:SQLite:db.sqlite");
+
+$schema_file->store ("some shit--- 2009-10-29
+create table var (var_name text, var_value text);
+create table test (test_id int, test_text text);
+
+--- 2009-10-30
+create table test2 (test2_id int, test2_text text);
+
+--- 2009-10-30.1
+drop table test2;
+create table test2 (test2_id int, test2_text text);
+
+");
+
+ok ! eval {Project::Easy::Helper::update_schema (
+	schema_file => $schema_file,
+	dbh => $dbh,
+	mode => 'install'
+);};
+
+$schema_file->store ("--- 2009-10-29
+create table var (var_name text, var_value text);
+create table test (test_id int, test_text text);
+
+--- 2009-10-30
+some shit;
+create table test2 (test2_id int, test2_text text);
+
+--- 2009-10-30.1
+drop table test2;
+create table test2 (test2_id int, test2_text text);
+
+");
+
+ok ! Project::Easy::Helper::update_schema (
+	schema_file => $schema_file,
+	dbh => $dbh,
+	mode => 'install'
+);
+
+my $sth = $dbh->prepare ('select var_value from var where var_name = ?');
+ok $sth->execute ('db_schema_version');
+my $schema_version = $sth->fetchrow_arrayref->[0];
+
+ok $schema_version eq '2009-10-29', 'check for commit after each successful stage';
+
+unlink 'db.sqlite';
+
+$dbh->disconnect;
+
+$dbh = DBI->connect ("dbi:SQLite:db.sqlite");
 
 $schema_file->store ("--- 2009-10-29
 create table var (var_name text, var_value text);

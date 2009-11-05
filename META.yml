@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Project-Easy
-version:            0.12
+version:            0.14
 abstract:           ~
 author:
     - Ivan Baktsheev <dot.and.thing@gmail.com>
@@ -11,7 +11,7 @@ configure_requires:
 build_requires:
     ExtUtils::MakeMaker:  0
 requires:
-    Class::Easy:  0
+    Class::Easy:  0.05
     DBI::Easy:    0
     IO::Easy:     0
     JSON:         2.15
