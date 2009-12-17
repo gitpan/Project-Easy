@@ -5,7 +5,7 @@ use IO::Easy;
 
 use Project::Easy::Helper;
 
-our $VERSION = '0.14';
+our $VERSION = '0.15';
 
 # because singletone
 our $instance = {};
@@ -84,6 +84,98 @@ sub init {
 	return $instance;
 }
 
+sub detect_environment {
+	my $class = shift;
+	
+	attach_paths ($class);
+	
+	my $root = IO::Easy->new (($class->lib_path =~ /(.*)lib$/)[0]);
+	
+	make_accessor ($class, 'root', default => $root);
+
+	my $distro_path = $root->append ('var', 'distribution');
+	
+	die "\$project_root/var/distribution not found"
+		unless -f $distro_path;
+	
+	my $distro_string = $distro_path->as_file->contents;
+	
+	chomp $distro_string;
+
+	die "can't recognise distribution '$distro_string'"
+		unless $distro_string;
+	
+	my ($distro, $fixup_core) = split (/:/, $distro_string, 2);
+	
+	make_accessor ($class, 'distro', default => $distro);
+	make_accessor ($class, 'fixup_core', default => $fixup_core);
+	
+	try_to_use ('Project::Easy::Config::File');
+	
+	my $conf_path = $root->append ($class->etc, $class->id . '.' . $class->conf_format)->as_file;
+	
+	die "can't locate generic config file at '$conf_path'"
+		unless -f $conf_path;
+	
+	# blessing for functionality extension: serializer
+	$conf_path = bless ($conf_path, 'Project::Easy::Config::File');
+	
+	make_accessor ($class, 'conf_path', default => $conf_path);
+	
+	my $fixup_path = $class->fixup_path_distro;
+
+	die "can't locate fixup config file at '$fixup_path'"
+		unless -f $fixup_path;
+	
+	make_accessor ($class, 'fixup_path', default => $fixup_path);
+	
+}
+
+sub fixup_path_distro {
+	my $self   = shift;
+	my $distro = shift || $self->distro;
+	
+	my $fixup_core = $self->fixup_core;
+	
+	my $fixup_path;
+	
+	if (defined $fixup_core and $fixup_core) {
+		$fixup_path = IO::Easy->new ($fixup_core)->append ($distro);
+	} else {
+		$fixup_path = $self->root->append ($self->etc, $distro);
+	}
+	
+	$fixup_path = $fixup_path->append ($self->id . '.' . $self->conf_format)->as_file;
+	
+	bless ($fixup_path, 'Project::Easy::Config::File');
+}
+
+sub config {
+	my $class = shift;
+	
+	if (@_ > 0) { # get config for another distro, do not cache
+		my $config = $class->conf_package->parse (
+			$instance, @_
+		);
+		
+		# reparse config
+		if ($_[0] eq $class->distro) {
+			$instance->{config} = $config
+		}
+		
+		return $config
+	}
+	
+	unless ($instance->{config}) {
+		$instance->{config} = $class->conf_package->parse (
+			$instance
+		);
+	}
+	
+	return $instance->{config};
+}
+
+
 sub _prepare_entity {
 	my $self = shift;
 	my $name = shift;
@@ -151,69 +243,6 @@ sub collection {
 	);
 }
 
-
-sub detect_environment {
-	my $class = shift;
-	
-	attach_paths ($class);
-	
-	my $root = IO::Easy->new (($class->lib_path =~ /(.*)lib$/)[0]);
-	
-	make_accessor ($class, 'root', default => $root);
-
-	my $distro_path = $root->append ('var', 'distribution');
-	my $distro_string = $distro_path->as_file->contents;
-	
-	chomp $distro_string;
-
-	die "can't recognise distribution '$distro_string'"
-		unless $distro_string;
-	
-	my ($distro, $fixup_core) = split (/:/, $distro_string, 2);
-	
-	make_accessor ($class, 'distro', default => $distro);
-	make_accessor ($class, 'fixup_core', default => $fixup_core);
-	
-	try_to_use ('Project::Easy::Config::File');
-	
-	my $conf_path = $root->append ($class->etc, $class->id . '.' . $class->conf_format)->as_file;
-	
-	die "can't locate generic config file at '$conf_path'"
-		unless -f $conf_path;
-	
-	# blessing for functionality extension: serializer
-	$conf_path = bless ($conf_path, 'Project::Easy::Config::File');
-	
-	make_accessor ($class, 'conf_path', default => $conf_path);
-	
-	my $fixup_path = $class->fixup_path_distro;
-
-	die "can't locate fixup config file at '$fixup_path'"
-		unless -f $fixup_path;
-	
-	make_accessor ($class, 'fixup_path', default => $fixup_path);
-	
-}
-
-sub fixup_path_distro {
-	my $self   = shift;
-	my $distro = shift || $self->distro;
-	
-	my $fixup_core = $self->fixup_core;
-	
-	my $fixup_path;
-	
-	if ($fixup_core) {
-		$fixup_path = IO::Easy->new ($fixup_core)->append ($distro);
-	} else {
-		$fixup_path = $self->root->append ($self->etc, $distro, $fixup_core);
-	}
-	
-	$fixup_path = $fixup_path->append ($self->id . '.' . $self->conf_format)->as_file;
-	
-	bless ($fixup_path, 'Project::Easy::Config::File');
-}
-
 sub daemon {
 	my $core = shift;
 	my $code = shift;
@@ -221,32 +250,7 @@ sub daemon {
 	return $core->daemons->{$code};
 }
 
-sub config {
-	my $class = shift;
-	
-	if (@_ > 0) { # get config for another distro, do not cache
-		my $config = $class->conf_package->parse (
-			$instance, @_
-		);
-		
-		# reparse config
-		if ($_[0] eq $class->distro) {
-			$instance->{config} = $config
-		}
-		
-		return $config
-	}
-	
-	unless ($instance->{config}) {
-		$instance->{config} = $class->conf_package->parse (
-			$instance
-		);
-	}
-	
-	return $instance->{config};
-}
-
-sub db {
+sub db { # TODO: rewrite using alert 
 	my $class = shift;
 	my $type  = shift || 'default';
 	

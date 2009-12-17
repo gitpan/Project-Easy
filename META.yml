@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Project-Easy
-version:            0.14
+version:            0.15
 abstract:           ~
 author:
     - Ivan Baktsheev <dot.and.thing@gmail.com>
@@ -11,10 +11,16 @@ configure_requires:
 build_requires:
     ExtUtils::MakeMaker:  0
 requires:
-    Class::Easy:  0.05
-    DBI::Easy:    0
-    IO::Easy:     0
-    JSON:         2.15
+    Class::Easy:  0.06
+    DBI::Easy:    0.13
+    IO::Easy:     0.08
+    JSON:         2.16
+    JSON::XS:     2.26
+resources:
+    bugtracker:  http://rt.cpan.org/NoAuth/Bugs.html?Dist=Project-Easy
+    homepage:    http://perlhug.com
+    license:     http://dev.perl.org/licenses/
+    repository:  git://web-app.git.sourceforge.net/gitroot/perl-easy/perl-easy
 no_index:
     directory:
         - t

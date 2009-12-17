@@ -51,7 +51,7 @@ ok (Project::Easy::Helper::check_state);
 my $date = localtime->ymd;
 
 my $schema_file = IO::Easy::File->new ('share/sql/default.sql');
-$schema_file->updir->create;
+$schema_file->parent->create;
 $schema_file->store (
 	$schema_file->contents .
 	"--- $date.15\ncreate table list (list_id integer primary key, list_title text, list_meta text);\n"

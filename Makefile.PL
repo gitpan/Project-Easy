@@ -6,10 +6,20 @@ WriteMakefile(
 	'dist' => { COMPRESS=>"gzip", SUFFIX=>"gz" },
 	AUTHOR => 'Ivan Baktsheev <dot.and.thing@gmail.com>',
 	EXE_FILES => ["bin/project-easy"],
+	META_MERGE      => {
+		resources => {
+			license     =>      'http://dev.perl.org/licenses/',
+			homepage    =>      'http://perlhug.com',
+			bugtracker  =>      'http://rt.cpan.org/NoAuth/Bugs.html?Dist=Project-Easy',
+			repository  =>      'git://web-app.git.sourceforge.net/gitroot/perl-easy/perl-easy',
+#			MailingList =>      'makemaker@perl.org',
+		},
+	},
 	PREREQ_PM => {
-		'IO::Easy'    => 0,
-		'Class::Easy' => 0.05,
-		'DBI::Easy'   => 0,
-		'JSON'        => 2.15,
+		'IO::Easy'    => '0.08',
+		'Class::Easy' => '0.06',
+		'DBI::Easy'   => '0.13',
+		'JSON'        => '2.16',
+		'JSON::XS'    => '2.26',
 	}
 );

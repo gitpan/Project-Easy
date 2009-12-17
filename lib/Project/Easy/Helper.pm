@@ -13,7 +13,7 @@ use Project::Easy::Helper::DB;
 use File::Spec;
 my $FS = 'File::Spec';
 
-our @scriptable = (qw(check_state config shell db updatedb));
+our @scriptable = (qw(fix_distro check_state config shell db updatedb));
 
 sub ::initialize {
 	my $params = \@_;
@@ -144,7 +144,7 @@ our \@paths = qw(
 	my $date = localtime->ymd;
 	
 	my $schema_file = IO::Easy::File->new ('share/sql/default.sql');
-	$schema_file->updir->create;
+	$schema_file->parent->create;
 	$schema_file->store (
 		"--- $date\ncreate table var (var_name text, var_value text);\n"
 	);
@@ -181,9 +181,28 @@ sub run_script {
 	}
 }
 
+sub fix_distro {
+
+}
+
 sub check_state {
 	
-	my ($pack, $libs) = &_script_wrapper;
+	my ($pack, $libs);
+	
+	eval {
+		($pack, $libs) = &_script_wrapper;
+	};
+	
+	my $distro_not_found = '\$project_root/var/distribution not found';
+	my $fix_command = 'bin/fix_distro';
+	
+	if ($@ =~ /^$distro_not_found/) {
+		die "$distro_not_found;
+probably you have cloned or checked out project from repository;
+if that's right, please run $fix_command to fix environment";
+	} elsif ($@) {
+		die $@;
+	}
 	
 	my $root = $pack->root;
 	
@@ -382,17 +401,20 @@ sub config {
 		} else {
 			eval "\$fixup_struct->$key_path = \$remains[0]";
 		}
+        
 		
 		# storing modified config
 
 		# Global config absolute path
 		my $global_config_file = $core->conf_path;
-		$global_config_file->patch ($fixup_struct);
-
-		# Local config absolute path
+		$global_config_file->patch ($fixup_struct, 'undef_keys_in_patch');
+        #warn(Dumper($global_config_file->contents));
+		
+        # Local config absolute path
 		my $local_config_file  = $core->fixup_path_distro ($core->distro);
 		$local_config_file->patch ($fixup_struct);
-		
+        #warn(Dumper($local_config_file->contents));
+
 		return 1;
 	}
 
@@ -414,6 +436,8 @@ sub _script_wrapper {
 		and $ENV{MOD_PERL_API_VERSION} >= 2
 		and try_to_use ('Apache2::ServerUtil')
 	) {
+		
+		eval {use Apache2::ServerUtil};
 		
 		my $server_root = Apache2::ServerUtil::server_root();
 		
