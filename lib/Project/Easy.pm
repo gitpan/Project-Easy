@@ -4,14 +4,15 @@ use Class::Easy;
 use IO::Easy;
 
 use Project::Easy::Helper;
+use Project::Easy::Config::File;
 
-our $VERSION = '0.15';
+our $VERSION = '0.17';
 
-# because singletone
-our $instance = {};
+# because singleton
+our $singleton = {};
 
-sub instance {
-	return $instance;
+sub singleton {
+	return $singleton;
 }
 
 has 'daemons', default => {};
@@ -28,21 +29,44 @@ sub import {
 	my @params = @_;
 	
 	if (scalar grep {$_ eq 'script'} @params) {
-
-		($::pack, $::libs) = Project::Easy::Helper::_script_wrapper;
-		push @INC, @$::libs;
+		Project::Easy::Helper::_script_wrapper;
+	
+	} elsif (scalar grep {$_ eq 'project'} @params) {
+		Project::Easy::Helper::_script_wrapper (undef, 1);
+	
 	}
 }
 
 sub init {
 	my $class = shift;
 	
-	die "you cannot use Project::Easy in one project more than one time ($instance->{_initialized})"
-		if $instance->{_initialized};
-	
 	my $conf_package = $class->conf_package;
 	try_to_use ($conf_package)
 		or die ('configuration package must exists');
+		
+	attach_paths ($class);
+
+	my $root = IO::Easy->new (($class->lib_path =~ /(.*)lib$/)[0]);
+
+	make_accessor ($class, 'root', default => $root);
+	
+	my $conf_path = $root->append ($class->etc, $class->id . '.' . $class->conf_format)->as_file;
+
+	die "can't locate generic config file at '$conf_path'"
+		unless -f $conf_path;
+
+	# blessing for functionality extension: serializer
+	$conf_path = bless ($conf_path, 'Project::Easy::Config::File');
+
+	make_accessor ($class, 'conf_path', default => $conf_path);
+	
+}
+
+sub instantiate {
+	my $class = shift;
+	
+	die "you cannot use Project::Easy in one project more than one time ($singleton->{_instantiated})"
+		if $singleton->{_instantiated};
 	
 	debug "here we try to detect package location, "
 		. "because this package isn't for public distribution "
@@ -53,16 +77,14 @@ sub init {
 	my $db_package = $class->db_package;
 	try_to_use ($db_package);
 	
-	bless $instance, $class;
+	bless $singleton, $class;
 	
-	$instance->{_initialized} = $class;
+	$singleton->{_instantiated} = $class;
 
-	my $config = $instance->config;
+	my $config = $singleton->config;
 
 	foreach my $db_id (keys %{$config->{db}}) {
-		next if $db_id eq 'default';
 		make_accessor ($class, "db_$db_id", default => sub {
-			my $class = shift;
 			return $class->db ($db_id);
 		});
 	}
@@ -75,24 +97,20 @@ sub init {
 		foreach my $d_name (keys %{$config->{daemons}}) {
 			my $d_conf = $config->{daemons}->{$d_name};
 			
-			my $d = $d_pack->new ($instance, $d_name, $d_conf);
+			my $d = $d_pack->new ($singleton, $d_name, $d_conf);
 			
-			$instance->daemons->{$d_name} = $d;
+			$singleton->daemons->{$d_name} = $d;
 		}
 	}
 	
-	return $instance;
+	return $singleton;
 }
 
 sub detect_environment {
 	my $class = shift;
 	
-	attach_paths ($class);
+	my $root = $class->root;
 	
-	my $root = IO::Easy->new (($class->lib_path =~ /(.*)lib$/)[0]);
-	
-	make_accessor ($class, 'root', default => $root);
-
 	my $distro_path = $root->append ('var', 'distribution');
 	
 	die "\$project_root/var/distribution not found"
@@ -109,18 +127,6 @@ sub detect_environment {
 	
 	make_accessor ($class, 'distro', default => $distro);
 	make_accessor ($class, 'fixup_core', default => $fixup_core);
-	
-	try_to_use ('Project::Easy::Config::File');
-	
-	my $conf_path = $root->append ($class->etc, $class->id . '.' . $class->conf_format)->as_file;
-	
-	die "can't locate generic config file at '$conf_path'"
-		unless -f $conf_path;
-	
-	# blessing for functionality extension: serializer
-	$conf_path = bless ($conf_path, 'Project::Easy::Config::File');
-	
-	make_accessor ($class, 'conf_path', default => $conf_path);
 	
 	my $fixup_path = $class->fixup_path_distro;
 
@@ -155,24 +161,24 @@ sub config {
 	
 	if (@_ > 0) { # get config for another distro, do not cache
 		my $config = $class->conf_package->parse (
-			$instance, @_
+			$singleton, @_
 		);
 		
 		# reparse config
 		if ($_[0] eq $class->distro) {
-			$instance->{config} = $config
+			$singleton->{config} = $config
 		}
 		
 		return $config
 	}
 	
-	unless ($instance->{config}) {
-		$instance->{config} = $class->conf_package->parse (
-			$instance
+	unless ($singleton->{config}) {
+		$singleton->{config} = $class->conf_package->parse (
+			$singleton
 		);
 	}
 	
-	return $instance->{config};
+	return $singleton->{config};
 }
 
 
@@ -188,10 +194,16 @@ sub _prepare_entity {
 	my $db_prefix = '';
 	
 	foreach my $k (grep {!/^default$/} keys %{$self->config->{db}}) {
-		$db_prefix = (split /(?=\p{IsUpper}\p{IsLower})/, DBI::Easy::Helper::package_from_table ($k))[0];
-		$table_name = DBI::Easy::Helper::table_from_package (substr ($qname, length ($db_prefix)))
-			if index ($qname, $db_prefix) == 0;
+		my $qk = DBI::Easy::Helper::package_from_table ($k);
+		if (index ($qname, $qk) == 0) {
+			$db_prefix = $qk;
+			$table_name = DBI::Easy::Helper::table_from_package (substr ($qname, length ($db_prefix)));
+		}
+		# $db_prefix = (split /(?=\p{IsUpper}\p{IsLower})/, DBI::Easy::Helper::package_from_table ($qname))[0];
+			
 	}
+	
+	# warn "$name: $qname, $table_name, $db_prefix";
 	
 	return ($qname, $table_name, $db_prefix);
 }
@@ -203,16 +215,18 @@ sub entity {
 	my ($qname, $table_name, $db_prefix) = $self->_prepare_entity ($name);
 	
 	my $entity_name  = $self->entity_prefix . $db_prefix . 'Record';
-	my $package_name = $self->entity_prefix . $db_prefix . $qname;
+	my $package_name = $self->entity_prefix . $qname;
 	
 	return $package_name
 		if try_to_use_quiet ($package_name);
 	
-	debug "virtual entity creation";
+	my $prefix = substr ($self->entity_prefix, 0, -2);
+	
+	debug "virtual entity creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
 	
 	DBI::Easy::Helper->r (
 		$qname,
-		prefix     => substr ($self->entity_prefix, 0, -2),
+		prefix     => $prefix,
 		entity     => $entity_name,
 		table_name => $table_name,
 	);
@@ -233,11 +247,13 @@ sub collection {
 	return $package_name
 		if try_to_use_quiet ($package_name);
 	
-	debug "virtual collection creation";
+	my $prefix = substr ($self->entity_prefix, 0, -2);
+
+	debug "virtual entity creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
 	
 	DBI::Easy::Helper->c (
 		$qname,
-		prefix     => substr ($self->entity_prefix, 0, -2),
+		prefix     => $prefix,
 		entity     => $entity_name,
 		table_name => $table_name,
 	);
@@ -254,7 +270,7 @@ sub db { # TODO: rewrite using alert
 	my $class = shift;
 	my $type  = shift || 'default';
 	
-	my $core = $class->instance; # fetch current process instance
+	my $core = $class->singleton; # fetch current process singleton
 	
 	$core->{db}->{$type} = {ts => {}}
 		unless $core->{db}->{$type};
@@ -322,7 +338,7 @@ Project::Easy - project deployment made easy.
 
 =over 4
 
-=item instance
+=item singleton
 
 return class instance
 
@@ -416,7 +432,7 @@ Project::Easy create default entity classes on initialization.
 this entity based on default database connection. you can use
 this connection (not recommended) within modules by mantra:
 
-	my $core = <project_namespace>->instance;
+	my $core = <project_namespace>->singleton;
 	my $dbh = $core->db;
 
 method db return default $dbh. you can use non-default dbh named 'cache' by calling:

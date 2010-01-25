@@ -16,8 +16,8 @@ WriteMakefile(
 		},
 	},
 	PREREQ_PM => {
-		'IO::Easy'    => '0.08',
-		'Class::Easy' => '0.06',
+		'IO::Easy'    => '0.11',
+		'Class::Easy' => '0.09',
 		'DBI::Easy'   => '0.13',
 		'JSON'        => '2.16',
 		'JSON::XS'    => '2.26',

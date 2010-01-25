@@ -33,18 +33,22 @@ $dir->create;
 
 chdir $dir;
 
+`$^X -MProject::Easy::Helper -e initialize $pack`;
+
 # SIMULATION: project-easy $pack
 
-::initialize ($pack);
+# ::initialize ($pack);
 
 # TEST
 
 my $root = IO::Easy::Dir->current;
 ok (-f $root->append ('lib', $path));
 
-# SIMULATION: bin/check_state
+# SIMULATION: bin/status
 
-ok (Project::Easy::Helper::check_state);
+ok `$^X bin/status` =~ /SUCCESS/ms;
+
+# ok (Project::Easy::Helper::status);
 
 # SIMULATION: bin/config
 
@@ -58,7 +62,18 @@ $schema_file->store (
 	
 );
 
-Project::Easy::Helper::update_schema;
+my $update_status = `$^X bin/updatedb`;
+ok $update_status =~ /done$/ms;
+
+# Project::Easy::Helper::update_schema;
+
+chdir $here;
+
+ok `$^X project-root/bin/status` =~ /SUCCESS/ms;
+
+`rm -rf project-root`;
+
+exit;
 
 my $list = $pack->entity ('list');
 
@@ -74,6 +89,12 @@ $list_rec->title ('hello, world!');
 ok $list_rec->create;
 
 ok $pack->collection ('list')->new->count == 1;
+
+# REMOVING var AND REINITIALIZATION
+
+$root->dir_io ('var')->rm_tree;
+
+warn '!!!!!!!!!!!!!!!', Project::Easy::Helper::status;
 
 # RESTORING
 

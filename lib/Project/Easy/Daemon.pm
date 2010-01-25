@@ -7,12 +7,12 @@ has 'code';
 
 sub new {
 	my $class    = shift;
-	my $instance = shift;
+	my $singleton = shift;
 	my $code     = shift;
 	my $config   = shift;
 	
-	my $root = $instance->root;
-	my $id   = $instance->id;
+	my $root = $singleton->root;
+	my $id   = $singleton->id;
 	
 	my $pid_file = $root->append ('var', 'run', $id . '-' . $code . '.pid')->as_file;
 	

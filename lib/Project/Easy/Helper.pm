@@ -3,17 +3,13 @@ package Project::Easy::Helper;
 use Data::Dumper;
 use Class::Easy;
 use IO::Easy;
-use IO::Easy::File;
 
 use Time::Piece;
 
 use Project::Easy::Config;
 use Project::Easy::Helper::DB;
 
-use File::Spec;
-my $FS = 'File::Spec';
-
-our @scriptable = (qw(fix_distro check_state config shell db updatedb));
+our @scriptable = (qw(status config updatedb));
 
 sub ::initialize {
 	my $params = \@_;
@@ -33,7 +29,7 @@ sub ::initialize {
 		die "please specify package namespace";
 	}
 	
-	my $data_files = IO::Easy::File::__data__files;
+	my $data_files = file->__data__files;
 	
 	my $data = {
 		namespace => $namespace,
@@ -47,7 +43,7 @@ sub ::initialize {
 	
 	my $distribution = 'local.' . scalar getpwuid ($<);
 	
-	my $root = IO::Easy->new ('.');
+	my $root = dir->current;
 	
 	my $lib_dir = $root->append (@path)->as_dir;
 	$lib_dir->create; # recursive directory creation	
@@ -139,18 +135,18 @@ our \@paths = qw(
 	
 	debug "file contents saving done";
 	
-	$0 = IO::Easy::Dir->current->append (qw(etc project-easy))->path;
+	$0 = dir->current->append (qw(etc project-easy))->path;
 	
 	my $date = localtime->ymd;
 	
-	my $schema_file = IO::Easy::File->new ('share/sql/default.sql');
+	my $schema_file = file ('share/sql/default.sql');
 	$schema_file->parent->create;
 	$schema_file->store (
 		"--- $date\ncreate table var (var_name text, var_value text);\n"
 	);
-	
+
 	config (qw(db.default template db.sqlite));
-	config (qw(db.default.attributes.dbname = var/test.sqlite));
+	config (qw(db.default.attributes.dbname = ), '{$root}/var/test.sqlite');
 	config (qw(db.default.update =), "$schema_file");
 	
 	$namespace->config ($distribution);
@@ -181,28 +177,44 @@ sub run_script {
 	}
 }
 
-sub fix_distro {
-
-}
-
-sub check_state {
-	
-	my ($pack, $libs);
+sub status {
+	my ($project_class, $libs);
 	
 	eval {
-		($pack, $libs) = &_script_wrapper;
+		($project_class, $libs) = &_script_wrapper;
 	};
 	
 	my $distro_not_found = '\$project_root/var/distribution not found';
-	my $fix_command = 'bin/fix_distro';
 	
 	if ($@ =~ /^$distro_not_found/) {
+		# we need to show user an option to replay project configuration
+		
+		&status_fail ($project_class, $libs);
+		
 		die "$distro_not_found;
 probably you have cloned or checked out project from repository;
-if that's right, please run $fix_command to fix environment";
+if that's right, please run this command with --fix option to fix environment";
 	} elsif ($@) {
 		die $@;
 	}
+	
+	return &status_ok ($project_class, $libs);
+	
+}
+
+sub status_fail {
+	my ($project_class, $libs, $params) = @_;
+	
+	my $root = $project_class->root;
+	
+	# here we must recreate var directories
+	# TODO: make it by Project::Easy::Helper service 'install' routine
+	
+	my $global_config = $project_class->conf_path->deserialize;
+}
+
+sub status_ok {
+	my ($pack, $libs, $params) = @_;
 	
 	my $root = $pack->root;
 	
@@ -243,8 +255,6 @@ if that's right, please run $fix_command to fix environment";
 	
 	# here we try to find dependencies
 	foreach (keys %$all_uses) {
-		#warn "TRY TO USE: $_ : " . try_to_use ($_) . "\n"
-		#	if ! /^Rian\:\:/;
 		$external->{$_} = $all_uses->{$_}
 			unless exists $all_packs->{$_};
 		
@@ -259,9 +269,10 @@ if that's right, please run $fix_command to fix environment";
 			if scalar keys %$failed;
 	
 	foreach my $file (@$files) {
-		my $path = $file->rel_path ($root->path);
+		my $abs_path = $file->abs_path;
+		my $rel_path = $file->rel_path ($root->rel_path);
 		
-		print run_script ("perl -c $includes $path", $path);
+		print run_script ("$^X -c $includes $abs_path", $rel_path);
 		
 	}
 
@@ -274,22 +285,21 @@ if that's right, please run $fix_command to fix environment";
 			if $file->type eq 'dir';
 		
 		if ($file =~ /\.(?:t|pl)$/) {
-			my $path = $file->rel_path;
+			my $path = $file->abs_path;
 			
-			print run_script ("perl $includes $path", $path);
+			print run_script ("$^X $includes $path", $path);
 		}
 	});
 	
 	print "SUCCESS\n";
 	
 	return $pack;
-	
 }
 
 sub shell {
 	my ($pack, $libs) = &_script_wrapper;
 	
-	my $core = $pack->instance;
+	my $core = $pack->singleton;
 	
 	my $distro = $ARGV[0];
 	
@@ -325,10 +335,10 @@ sub config {
 	
 	my ($package, $libs) = &_script_wrapper(); # Project name and "libs" path
 	
-	my $core   = $package->instance;  # Project instance
+	my $core   = $package->singleton;  # Project singleton
 	my $config = $core->config;
 	
-	my $templates = IO::Easy::File::__data__files ();   # Got all "data files" at end of file
+	my $templates = file->__data__files ();   # Got all "data files" at end of file
 
 	my ($key, $command, @remains) = @params;
 	
@@ -423,37 +433,49 @@ sub config {
 	return;
 }
 
-
 sub _script_wrapper {
 	# because some calls dispatched to external scripts, but called from project dir
-	my $local_conf = shift || $0; 
+	my $local_conf = shift || $0;
+	my $importing  = shift ||  0;
 	my $lib_path;
+	
+	return ($::project, $::libs)
+		if defined $::project;
 	
 	debug "called from $local_conf";
 	
-	if (
-		exists $ENV{MOD_PERL_API_VERSION}
-		and $ENV{MOD_PERL_API_VERSION} >= 2
-		and try_to_use ('Apache2::ServerUtil')
-	) {
+	if (exists $ENV{'MOD_PERL'}) {
 		
-		eval {use Apache2::ServerUtil};
+		my $server_root;
 		
-		my $server_root = Apache2::ServerUtil::server_root();
+		if (
+			exists $ENV{MOD_PERL_API_VERSION}
+			and $ENV{MOD_PERL_API_VERSION} >= 2
+			and try_to_use_inc ('Apache2::ServerUtil')
+		) {
+			
+			$server_root = Apache2::ServerUtil::server_root();
+			
+		} elsif (try_to_use_inc ('Apache')) {
+			
+			$server_root = Apache::server_root_relative();
+			
+		} else {
+			die "you try to run project::easy under mod_perl, but we cannot work with your version. if you have mod_perl-1.99, use solution from CGI::minimal or upgrade your mod_perl";
+		}
 		
 		$local_conf = "$server_root/etc/project-easy";
 		$lib_path   = "$server_root/lib";
 		
-	} elsif ($local_conf =~ /etc\/project-easy$/) {
-		$lib_path = 'lib';
+	} elsif ($local_conf =~ /(.*)etc\/project-easy$/) {
+		$lib_path = "$1lib";
 	} else {
+		
 		$local_conf =~ s/(.*)(^|\/)(?:t|cgi-bin|tools|bin)\/.*/$1$2etc\/project-easy/si;
 		$lib_path = "$1$2lib";
 	}
 	
-	unless ($FS->file_name_is_absolute ($lib_path)) {
-		$lib_path = $FS->rel2abs ($lib_path);
-	}
+	$lib_path = dir ($lib_path)->abs_path;
 	
 	$local_conf =~ s/etc\//conf\//
 		unless -f $local_conf;
@@ -463,25 +485,22 @@ sub _script_wrapper {
 	
 	require $local_conf;
 
-	push @INC, @LocalConf::paths, $lib_path;
+	push @INC, @LocalConf::paths, $lib_path->path;
 	
 	my $pack = $LocalConf::pack;
 	
 	debug "main project module is: $pack";
-	
-	eval "
-use $pack;
-use IO::Easy;
-use Class::Easy;
-use DBI::Easy;
-";
 
-	if ($@) {
-		print "something wrong with base modules: $@";
-		exit;
-	}
+	#use Carp;
+	#$SIG{ __DIE__ } = sub { Carp::confess( @_ ) };
 	
-	my @result = ($pack, [@LocalConf::paths, $lib_path]);
+	eval "use Class::Easy; use IO::Easy; use DBI::Easy; " . ($importing ? '' : "use $pack;");
+	if ($@) {
+		die 'base modules fails: ', $@;
+	}
+
+	my @result = ($::project, $::libs) = ($pack, [@LocalConf::paths, $lib_path->path]);
+	
 	return @result;
 }
 
@@ -496,27 +515,20 @@ __DATA__
 ########################################
 
 package {$namespace};
-# $Id: Helper.pm,v 1.9 2009/07/20 17:53:49 apla Exp $
 
 use Class::Easy;
 
-use Project::Easy;
 use base qw(Project::Easy);
 
-has 'id', default => '{$project_id}';
-has 'conf_format', default => 'json';
+has id => '{$project_id}';
+has conf_format => 'json';
 
 my $class = __PACKAGE__;
 
-has 'entity_prefix', default => join '::', $class, 'Entity', '';
+has entity_prefix => join '::', $class, 'Entity', '';
 
 $class->init;
-
-# TODO: check why Project::Easy isn't provide db method
-has 'db', default => sub {
-	shift;
-	return $class->SUPER::db (@_);
-};
+$class->instantiate;
 
 1;
 
@@ -525,7 +537,7 @@ has 'db', default => sub {
 ########################################
 
 #!/usr/bin/perl
-use strict;
+use Class::Easy;
 use Project::Easy::Helper;
 &Project::Easy::Helper::{$script_name};
 
@@ -544,7 +556,7 @@ our $wrapper = 1;
 sub _init_db {
 	my $self = shift;
 	
-	$self->dbh (\&{$namespace}::db);
+	$self->dbh ($::project->can ('db_default'));
 }
 
 1;
