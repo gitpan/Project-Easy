@@ -458,7 +458,7 @@ sub _script_wrapper {
 			
 		} elsif (try_to_use_inc ('Apache')) {
 			
-			$server_root = Apache::server_root_relative();
+			$server_root = Apache::server_root_relative('');
 			
 		} else {
 			die "you try to run project::easy under mod_perl, but we cannot work with your version. if you have mod_perl-1.99, use solution from CGI::minimal or upgrade your mod_perl";
