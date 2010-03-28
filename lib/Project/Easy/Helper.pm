@@ -470,8 +470,8 @@ sub _script_wrapper {
 			die "you try to run project::easy under mod_perl, but we cannot work with your version. if you have mod_perl-1.99, use solution from CGI::minimal or upgrade your mod_perl";
 		}
 		
-		$local_conf = dir ($server_root, qw(etc project-easy));
-		$lib_path   = dir ($server_root, "lib");
+		$local_conf = dir ($server_root)->dir_io (qw(etc project-easy));
+		$lib_path   = dir ($server_root)->dir_io ("lib");
 		
 	} elsif ($local_conf->name eq 'project-easy' and $local_conf->parent->name eq 'etc') {
 		$lib_path = $local_conf->parent->parent->dir_io ('lib');

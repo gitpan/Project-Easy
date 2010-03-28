@@ -6,7 +6,7 @@ use IO::Easy;
 use Project::Easy::Helper;
 use Project::Easy::Config::File;
 
-our $VERSION = '0.19';
+our $VERSION = '0.20';
 
 # because singleton
 our $singleton = {};

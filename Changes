@@ -1,5 +1,12 @@
 2010-03-28	Ivan Baktsheev <dot.and.thing@gmail.com>
 
+	Release 0.20
+
+	minor fix for io::easy
+
+
+2010-03-28	Ivan Baktsheev <dot.and.thing@gmail.com>
+
 	Release 0.19
 
 	windows fixes
