@@ -15,9 +15,13 @@ sub parse {
 	my $path  = $core->conf_path;
 	my $fixup = $core->fixup_path_distro ($distro);
 	
+	# TODO: replace to real splitpath and join '/' for windows users
+	my $root_path = $core->root->path;
+	$root_path =~ s/\\/\//g;
+
 	# here we want to expand some generic params
 	my $expansion = {
-		root   => $core->root->path,
+		root   => $root_path,
 		id     => $core->id,
 		distro => $core->distro,
 	};

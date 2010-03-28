@@ -5,35 +5,39 @@ use Class::Easy;
 BEGIN {
 	use Class::Easy;
 	$Class::Easy::DEBUG = 'immediately';
+	use IO::Easy;
+	unshift @INC, dir->current->dir_io('lib')->path;
+
+	use Test::More qw(no_plan);
+
+	use_ok 'Project::Easy::Helper';
+
 }
 
-use Test::More qw(no_plan);
-
 use Time::Piece;
-
-use IO::Easy::Dir;
-
-use Project::Easy::Helper;
 
 my $pack = 'Acme::Project::Easy::Test';
 my $path = 'Acme/Project/Easy/Test.pm';
 
-my $here = IO::Easy::Dir->current;
+my $here = dir->current;
 
-if (-d $here->append ('project-root')) {
-	`rm -rf project-root`;
+my $project_root = $here->dir_io ('project-root');
+
+if (-d $project_root) {
+	$project_root->rm_tree;
 }
 
 # SIMULATION: mkdir project-root;
 
-my $dir = IO::Easy::Dir->new ('project-root');
-$dir->create;
+$project_root->create;
 
 # SIMULATION: cd project-root
 
-chdir $dir;
+my $lib = dir->current->dir_io('lib')->path;
 
-`$^X -MProject::Easy::Helper -e initialize $pack`;
+chdir $project_root;
+
+`$^X -I$lib -MProject::Easy::Helper -e initialize $pack`;
 
 # SIMULATION: project-easy $pack
 
@@ -41,12 +45,12 @@ chdir $dir;
 
 # TEST
 
-my $root = IO::Easy::Dir->current;
-ok (-f $root->append ('lib', $path));
+my $root = dir->current;
+ok (-f $root->append ('lib', $path), 'libraries available');
 
 # SIMULATION: bin/status
 
-ok `$^X bin/status` =~ /SUCCESS/ms;
+ok `$^X -I$lib bin/status` =~ /SUCCESS/ms;
 
 # ok (Project::Easy::Helper::status);
 
@@ -62,16 +66,16 @@ $schema_file->store (
 	
 );
 
-my $update_status = `$^X bin/updatedb`;
+my $update_status = `$^X -I$lib bin/updatedb`;
 ok $update_status =~ /done$/ms;
 
 # Project::Easy::Helper::update_schema;
 
 chdir $here;
 
-ok `$^X project-root/bin/status` =~ /SUCCESS/ms;
+ok `$^X -I$lib project-root/bin/status` =~ /SUCCESS/ms;
 
-`rm -rf project-root`;
+$project_root->rm_tree;
 
 exit;
 
@@ -100,4 +104,4 @@ warn '!!!!!!!!!!!!!!!', Project::Easy::Helper::status;
 
 chdir $here;
 
-`rm -rf project-root`;
+$project_root->rm_tree;

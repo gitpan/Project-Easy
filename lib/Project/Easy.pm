@@ -6,7 +6,7 @@ use IO::Easy;
 use Project::Easy::Helper;
 use Project::Easy::Config::File;
 
-our $VERSION = '0.18';
+our $VERSION = '0.19';
 
 # because singleton
 our $singleton = {};
@@ -43,15 +43,15 @@ sub init {
 	my $conf_package = $class->conf_package;
 	try_to_use ($conf_package)
 		or die ('configuration package must exists');
-		
-	attach_paths ($class);
-
-	my $root = IO::Easy->new (($class->lib_path =~ /(.*)lib$/)[0]);
+	
+	$class->attach_paths;
+	
+	my $root = dir ($class->lib_path)->parent;
 
 	make_accessor ($class, 'root', default => $root);
 	
 	my $conf_path = $root->append ($class->etc, $class->id . '.' . $class->conf_format)->as_file;
-
+	
 	die "can't locate generic config file at '$conf_path'"
 		unless -f $conf_path;
 

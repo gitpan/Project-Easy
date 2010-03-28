@@ -64,9 +64,12 @@ my $schema_version = $sth->fetchrow_arrayref->[0];
 
 ok $schema_version eq '2009-10-29', 'check for commit after each successful stage';
 
-unlink 'db.sqlite';
-
+eval {$sth->finish};
 $dbh->disconnect;
+
+ok unlink 'db.sqlite';
+
+
 
 $dbh = DBI->connect ("dbi:SQLite:db.sqlite");
 

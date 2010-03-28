@@ -40,8 +40,10 @@ sub ::initialize {
 		$data_files->{'Project.pm'},
 		$data
 	);
-	
-	my $distribution = 'local.' . scalar getpwuid ($<);
+
+	my $login = eval {scalar getpwuid ($<)};
+
+	my $distribution = 'local' . (defined $login ? ".$login" : '');
 	
 	my $root = dir->current;
 	
@@ -163,16 +165,16 @@ sub run_script {
 	my $script = shift;
 	my $path   = shift;
 	
-	print `$script`;
+	# print `$script`;
 	
 	my $res = $? >> 8;
 	if ($res == 0) {
-		# print $path, " … OK\n";
+		debug $path, " … OK\n";
 	} elsif ($res == 255) {
-		print $path, " … DIED\n";
+		warn $path, " … DIED\n";
 		exit;
 	} else {
-		print $path, " … FAILED $res TESTS\n";
+		warn $path, " … FAILED $res TESTS\n";
 		exit;
 	}
 }
@@ -220,7 +222,7 @@ sub status_ok {
 	
 	my $lib_dir = $root->append ('lib')->as_dir;
 	
-	my $includes = join ' ', map {"-I$_"} @$libs;
+	my $includes = join ' ', map {"-I$_"} (@$libs, @INC);
 	
 	my $files = [];
 	my $all_uses = {};
@@ -262,7 +264,7 @@ sub status_ok {
 			if ! try_to_use ($_) and ! exists $all_packs->{$_};
 	}
 	
-	warn "external modules: ", join ' ', sort keys %$external;
+	debug "external modules: ", join (' ', sort keys %$external), "\n";
 	
 	warn "requirements not satisfied. you must install these modules:\ncpan -i ",
 		join (' ', sort keys %$failed), "\n"
@@ -271,6 +273,8 @@ sub status_ok {
 	foreach my $file (@$files) {
 		my $abs_path = $file->abs_path;
 		my $rel_path = $file->rel_path ($root->rel_path);
+
+		# warn "$^X -c $includes $abs_path";
 		
 		print run_script ("$^X -c $includes $abs_path", $rel_path);
 		
@@ -441,9 +445,11 @@ sub _script_wrapper {
 	
 	return ($::project, $::libs)
 		if defined $::project;
-	
+
 	debug "called from $local_conf";
 	
+	$local_conf = dir ($local_conf);
+
 	if (exists $ENV{'MOD_PERL'}) {
 		
 		my $server_root;
@@ -464,21 +470,29 @@ sub _script_wrapper {
 			die "you try to run project::easy under mod_perl, but we cannot work with your version. if you have mod_perl-1.99, use solution from CGI::minimal or upgrade your mod_perl";
 		}
 		
-		$local_conf = "$server_root/etc/project-easy";
-		$lib_path   = "$server_root/lib";
+		$local_conf = dir ($server_root, qw(etc project-easy));
+		$lib_path   = dir ($server_root, "lib");
 		
-	} elsif ($local_conf =~ /(.*)etc\/project-easy$/) {
-		$lib_path = "$1lib";
+	} elsif ($local_conf->name eq 'project-easy' and $local_conf->parent->name eq 'etc') {
+		$lib_path = $local_conf->parent->parent->dir_io ('lib');
 	} else {
-		
-		$local_conf =~ s/(.*)(^|\/)(?:t|cgi-bin|tools|bin)\/.*/$1$2etc\/project-easy/si;
-		$lib_path = "$1$2lib";
+		my $root;
+		my $parent = $local_conf;
+		PROJECT_ROOT: while ($parent = $parent->parent) {
+			
+			foreach (qw(t cgi-bin tools bin)) {
+				if ($parent->name eq $_) {
+					$root = $parent->parent;
+					$local_conf = $root->file_io (qw(etc project-easy));
+					$lib_path = $root->dir_io ('lib');
+					last PROJECT_ROOT;
+				}
+			}
+		}
+		die unless defined $root;
 	}
 	
-	$lib_path = dir ($lib_path)->abs_path;
-	
-	$local_conf =~ s/etc\//conf\//
-		unless -f $local_conf;
+	$lib_path = $lib_path->abs_path;
 	
 	debug "local conf is: $local_conf, lib path is: ",
 		join (', ', @LocalConf::paths, $lib_path), "\n";
