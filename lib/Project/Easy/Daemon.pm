@@ -1,6 +1,7 @@
 package Project::Easy::Daemon;
 
 use Class::Easy;
+use IO::Easy;
 
 has 'pid_file';
 has 'code';
@@ -14,10 +15,20 @@ sub new {
 	my $root = $singleton->root;
 	my $id   = $singleton->id;
 	
-	my $pid_file = $root->append ('var', 'run', $id . '-' . $code . '.pid')->as_file;
+	if (defined $config->{pid_file}) {
+		$config->{pid_file} = file ($config->{pid_file});
+	} else {
+		
+		$config->{pid_file} = $root->file_io ('var', 'run', $id . '-' . $code . '.pid');
+	}
+	
+	if (defined $config->{log_file}) {
+		$config->{log_file} = file ($config->{log_file});
+	} else {
+		$config->{log_file} = $root->file_io ('var', 'log', $id . '-' . $code . '_log');
+	}
 	
 	$config->{code} = $code;
-	$config->{pid_file} = $pid_file;
 	
 	bless $config, $class;
 }
@@ -25,10 +36,58 @@ sub new {
 sub launch {
 	my $self = shift;
 	
-	my $conf_file = $self->{conf_file};
-	my $httpd_bin = $self->{bin};
-	print "starting daemon by: $httpd_bin -f $conf_file\n";
-	`$httpd_bin -f $conf_file`;
+	if ($self->{package}) {
+	
+		my $ppid = fork();
+
+		if (not defined $ppid) {
+			print "resources not avilable.\n";
+		} elsif ($ppid == 0) {
+			# exit(0);
+			die "cannot detach from controlling terminal"
+				if POSIX::setsid() < 0;
+
+			my $log_fh;
+
+			my $pid_file = $self->{pid_file};
+			$pid_file->store ($$);
+			
+			die 'cannot open log file to append'
+				unless open $log_fh, '>>', $self->{log_file}->path;
+
+			# DIRTY
+			$SIG{__WARN__} = sub {
+				print $log_fh @_;
+			};
+			$SIG{__DIE__} = sub {
+				print $log_fh @_;
+			};
+
+			my $previous_default = select ($log_fh);
+			$|++;
+			select ($previous_default);
+
+			close STDOUT;
+			close STDERR;
+			close STDIN;
+			
+			if ($self->can ('_launched')) {
+				$self->_launched;
+			}
+
+		} else {
+			exit (0);
+		}
+	
+	} elsif ($self->{bin}) {
+		# DEPRECATED
+		my $conf_file = $self->{conf_file};
+		my $httpd_bin = $self->{bin};
+		print "starting daemon by: $httpd_bin -f $conf_file\n";
+		`$httpd_bin -f $conf_file`;
+		
+	}
+	
 	
 	sleep 1;
 	
@@ -78,6 +137,19 @@ sub shutdown {
 	kill 15, $pid;
 
 	my $count = 10;
+	
+	for (1..$count) {
+		print ($count + 1 - $_ ."… ");
+		sleep 1;
+		# wait one more second
+		unless ($self->running) {
+			return 1;
+		}
+	}
+
+	print "kill with force\n";
+
+	kill 9, $pid;
 	
 	for (1..$count) {
 		print ($count + 1 - $_ ."… ");

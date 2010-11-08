@@ -6,7 +6,7 @@ use IO::Easy;
 use Project::Easy::Helper;
 use Project::Easy::Config::File;
 
-our $VERSION = '0.20';
+our $VERSION = '0.21';
 
 # because singleton
 our $singleton = {};
@@ -30,6 +30,9 @@ sub import {
 	
 	if (scalar grep {$_ eq 'script'} @params) {
 		Project::Easy::Helper::_script_wrapper;
+
+		Class::Easy->import;
+		IO::Easy->import;
 	
 	} elsif (scalar grep {$_ eq 'project'} @params) {
 		Project::Easy::Helper::_script_wrapper (undef, 1);
@@ -97,7 +100,16 @@ sub instantiate {
 		foreach my $d_name (keys %{$config->{daemons}}) {
 			my $d_conf = $config->{daemons}->{$d_name};
 			
-			my $d = $d_pack->new ($singleton, $d_name, $d_conf);
+			my $d;
+			
+			if ($d_conf->{package}) {
+				try_to_use ($d_conf->{package});
+				$d = $d_conf->{package}->new ($singleton, $d_name, $d_conf);
+			} else {
+				$d = $d_pack->new ($singleton, $d_name, $d_conf);
+			}
+			
+			
 			
 			$singleton->daemons->{$d_name} = $d;
 		}
@@ -222,7 +234,7 @@ sub entity {
 	
 	my $prefix = substr ($self->entity_prefix, 0, -2);
 	
-	debug "virtual entity creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
+	debug ".pm on disk not found (or compilation failed), virtual entity creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
 	
 	DBI::Easy::Helper->r (
 		$qname,
@@ -237,26 +249,37 @@ sub collection {
 	my $name = shift;
 	
 	# we must initialize entity prior to collection
-	$self->entity ($name);
-	
+	#$self->entity ($name);
+	my $entity_package = $self->entity ($name);
+
 	my ($qname, $table_name, $db_prefix) = $self->_prepare_entity ($name);
 	
 	my $entity_name  = $self->entity_prefix . $db_prefix . 'Collection';
-	my $package_name = $self->entity_prefix . $db_prefix . $qname . '::Collection';
+	my $package_name = $self->entity_prefix . $qname . '::Collection';
 	
 	return $package_name
 		if try_to_use_quiet ($package_name);
 	
-	my $prefix = substr ($self->entity_prefix, 0, -2);
-
-	debug "virtual entity creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
+	debug $@; 
 	
-	DBI::Easy::Helper->c (
+	my $prefix = substr ($self->entity_prefix, 0, -2);
+        
+	$table_name = $entity_package->table_name
+		if $entity_package->can ('table_name');
+	
+	debug ".pm on disk not found (or compilation failed), virtual collection creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
+
+	my @params = (
 		$qname,
-		prefix     => $prefix,
-		entity     => $entity_name,
+		prefix      => $prefix,
+		entity      => $entity_name,
 		table_name => $table_name,
 	);
+
+	push @params, (column_prefix => $entity_package->column_prefix)
+		if $entity_package->can ('column_prefix');
+		
+	DBI::Easy::Helper->c (@params);
 }
 
 sub daemon {
@@ -281,6 +304,7 @@ sub db { # TODO: rewrite using alert
 		
 		$DBI::Easy::ERRHANDLER = sub {
 			debug '%%%%%%%%%%%%%%%%%%%%%% DBI ERROR: we relaunch connection %%%%%%%%%%%%%%%%%%%%%%%%';
+			debug $@;
 			return $class->db;
 		};
 		

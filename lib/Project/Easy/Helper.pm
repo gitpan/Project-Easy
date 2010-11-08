@@ -92,10 +92,7 @@ our \@paths = qw(
 1;
 ");
 	
-	my $var = $root->append ('var');
-	foreach (qw(db lock log run)) {
-		$var->append ($_)->as_dir->create;
-	}
+	my $var = create_var ($root);
 	
 	my $distro = $var->append ('distribution')->as_file;
 	$distro->store_if_empty ($distribution);
@@ -159,6 +156,17 @@ our \@paths = qw(
 	
 	# TODO: be more user-friendly: show help after finish
 	
+	
+}
+
+sub create_var {
+	my $root = shift;
+	my $var = $root->dir_io ('var');
+	foreach (qw(db lock log run)) {
+		$var->dir_io ($_)->create;
+	}
+	
+	return $var;
 }
 
 sub run_script {
@@ -449,7 +457,9 @@ sub _script_wrapper {
 	debug "called from $local_conf";
 	
 	$local_conf = dir ($local_conf);
-
+	
+	my $root;
+	
 	if (exists $ENV{'MOD_PERL'}) {
 		
 		my $server_root;
@@ -470,13 +480,15 @@ sub _script_wrapper {
 			die "you try to run project::easy under mod_perl, but we cannot work with your version. if you have mod_perl-1.99, use solution from CGI::minimal or upgrade your mod_perl";
 		}
 		
-		$local_conf = dir ($server_root)->dir_io (qw(etc project-easy));
-		$lib_path   = dir ($server_root)->dir_io ("lib");
+		$root = dir ($server_root);
+		$local_conf = $root->dir_io (qw(etc project-easy));
+		$lib_path   = $root->dir_io ("lib");
 		
 	} elsif ($local_conf->name eq 'project-easy' and $local_conf->parent->name eq 'etc') {
+		$root = $local_conf->parent->parent;
 		$lib_path = $local_conf->parent->parent->dir_io ('lib');
 	} else {
-		my $root;
+		
 		my $parent = $local_conf;
 		PROJECT_ROOT: while ($parent = $parent->parent) {
 			
@@ -488,6 +500,9 @@ sub _script_wrapper {
 					last PROJECT_ROOT;
 				}
 			}
+			
+			last if ($parent->path eq $parent->parent->path);
+			
 		}
 		die unless defined $root;
 	}
@@ -507,6 +522,13 @@ sub _script_wrapper {
 
 	#use Carp;
 	#$SIG{ __DIE__ } = sub { Carp::confess( @_ ) };
+	
+	# check for required directories, create if necessary
+	if (! -d $root->dir_io ('var')) {
+		create_var ($root);
+	}
+	
+	# here we check for real package availability
 	
 	eval "use Class::Easy; use IO::Easy; use DBI::Easy; " . ($importing ? '' : "use $pack;");
 	if ($@) {
