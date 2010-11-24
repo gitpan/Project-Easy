@@ -1,3 +1,12 @@
+2010-11-24	Ivan Baktsheev <dot.and.thing@gmail.com>
+
+	Release 0.22
+
+	various fixes for entities/collections
+	fixed reconnection after DBI error
+	added setuid/setgid for daemon
+
+
 2010-11-02	Ivan Baktsheev <dot.and.thing@gmail.com>
 
 	Release 0.21

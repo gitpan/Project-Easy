@@ -3,6 +3,8 @@ package Project::Easy::Daemon;
 use Class::Easy;
 use IO::Easy;
 
+use POSIX ();
+
 has 'pid_file';
 has 'code';
 
@@ -37,7 +39,25 @@ sub launch {
 	my $self = shift;
 	
 	if ($self->{package}) {
-	
+		
+		if ($self->{user}) {
+			my $uid = $self->{user};
+			$uid = (getpwnam ($self->{user})) [2]
+				if $self->{user} !~ /^\d+$/;
+			
+			POSIX::setuid ($uid)
+				if defined $uid and $uid;
+		}
+
+		if ($self->{group}) {
+			my $gid = $self->{group};
+			$gid = (getgrnam ($self->{group})) [2]
+				if $self->{group} !~ /^\d+$/;
+			
+			POSIX::setgid ($gid)
+				if defined $gid and $gid;
+		}
+		
 		my $ppid = fork();
 
 		if (not defined $ppid) {
@@ -143,6 +163,7 @@ sub shutdown {
 		sleep 1;
 		# wait one more second
 		unless ($self->running) {
+			unlink $self->pid_file;
 			return 1;
 		}
 	}
@@ -156,6 +177,7 @@ sub shutdown {
 		sleep 1;
 		# wait one more second
 		unless ($self->running) {
+			unlink $self->pid_file;
 			return 1;
 		}
 	}

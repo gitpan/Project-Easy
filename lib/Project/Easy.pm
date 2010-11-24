@@ -6,7 +6,7 @@ use IO::Easy;
 use Project::Easy::Helper;
 use Project::Easy::Config::File;
 
-our $VERSION = '0.21';
+our $VERSION = '0.22';
 
 # because singleton
 our $singleton = {};
@@ -232,9 +232,12 @@ sub entity {
 	return $package_name
 		if try_to_use_quiet ($package_name);
 	
+	die "package $package_name compilation failed with error: $@"
+		unless $!;
+	
 	my $prefix = substr ($self->entity_prefix, 0, -2);
 	
-	debug ".pm on disk not found (or compilation failed), virtual entity creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
+	debug "virtual entity creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
 	
 	DBI::Easy::Helper->r (
 		$qname,
@@ -260,14 +263,15 @@ sub collection {
 	return $package_name
 		if try_to_use_quiet ($package_name);
 	
-	debug $@; 
+	die "package $package_name compilation failed with error: $@"
+		unless $!;
 	
 	my $prefix = substr ($self->entity_prefix, 0, -2);
         
 	$table_name = $entity_package->table_name
 		if $entity_package->can ('table_name');
 	
-	debug ".pm on disk not found (or compilation failed), virtual collection creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
+	debug "virtual collection creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
 
 	my @params = (
 		$qname,
@@ -304,8 +308,17 @@ sub db { # TODO: rewrite using alert
 		
 		$DBI::Easy::ERRHANDLER = sub {
 			debug '%%%%%%%%%%%%%%%%%%%%%% DBI ERROR: we relaunch connection %%%%%%%%%%%%%%%%%%%%%%%%';
-			debug $@;
-			return $class->db;
+			debug 'ERROR: ', $@;
+			
+			my $old_dbh = delete $current_db->{$$};
+
+			$old_dbh->disconnect
+				if $old_dbh;
+
+			$current_db->{$$} = $class->db_package->new ($core, $type);
+			$current_db->{ts}->{$$} = time;
+			
+			return $class->db ($type);
 		};
 		
 		my $t = timer ("database handle start");
