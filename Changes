@@ -1,3 +1,11 @@
+2010-12-10	Ivan Baktsheev <dot.and.thing@gmail.com>
+
+	Release 0.23
+
+	added sql launch after connection establishing
+	added optional package to db config for instantiate
+
+
 2010-11-24	Ivan Baktsheev <dot.and.thing@gmail.com>
 
 	Release 0.22

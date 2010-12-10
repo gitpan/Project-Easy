@@ -36,6 +36,17 @@ sub new {
 		$db_conf->{options},
 	);
 	
+	if ($dbh and defined $db_conf->{do_after_connect}) {
+		my $sql_list = $db_conf->{do_after_connect};
+		if (! ref $sql_list) {
+			$sql_list = [$sql_list];
+		}
+
+		foreach my $sql (@$sql_list) {
+			$dbh->do ($sql) or die "can't do $sql";
+		}
+	}
+
 	# $dbh->trace (1, join ('/', $auction->root, 'var', 'log', 'dbi_trace'));
 	
 	return $dbh;

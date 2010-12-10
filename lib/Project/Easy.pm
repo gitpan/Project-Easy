@@ -6,7 +6,7 @@ use IO::Easy;
 use Project::Easy::Helper;
 use Project::Easy::Config::File;
 
-our $VERSION = '0.22';
+our $VERSION = '0.23';
 
 # because singleton
 our $singleton = {};
@@ -303,7 +303,9 @@ sub db { # TODO: rewrite using alert
 		unless $core->{db}->{$type};
 	
 	my $current_db = $core->{db}->{$type};
-	
+
+	my $db_package = $core->config->{db}->{$type}->{package} || $core->db_package;
+
 	unless ($current_db->{$$}) {
 		
 		$DBI::Easy::ERRHANDLER = sub {
@@ -315,14 +317,14 @@ sub db { # TODO: rewrite using alert
 			$old_dbh->disconnect
 				if $old_dbh;
 
-			$current_db->{$$} = $class->db_package->new ($core, $type);
+			$current_db->{$$} = $db_package->new ($core, $type);
 			$current_db->{ts}->{$$} = time;
 			
 			return $class->db ($type);
 		};
 		
 		my $t = timer ("database handle start");
-		$current_db->{$$} = $class->db_package->new ($core, $type);
+		$current_db->{$$} = $db_package->new ($core, $type);
 		$current_db->{ts}->{$$} = time;
 		$t->end;
 		
@@ -335,7 +337,7 @@ sub db { # TODO: rewrite using alert
 		$old_dbh->disconnect
 			if $old_dbh;
 		
-		$current_db->{$$} = $class->db_package->new ($core, $type);
+		$current_db->{$$} = $db_package->new ($core, $type);
 		$current_db->{ts}->{$$} = time;
 	}
 	
