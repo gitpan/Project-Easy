@@ -6,7 +6,7 @@ use IO::Easy;
 use Project::Easy::Helper;
 use Project::Easy::Config::File;
 
-our $VERSION = '0.23';
+our $VERSION = '0.24';
 
 # because singleton
 our $singleton = {};
@@ -193,12 +193,11 @@ sub config {
 	return $singleton->{config};
 }
 
-
-sub _prepare_entity {
+sub _detect_entity {
 	my $self = shift;
 	my $name = shift;
 
-	# TODO: check for entity in entity list before trim prefix
+	# TODO: move methods from DBI::Easy::Helper
 	
 	my $qname      = DBI::Easy::Helper::package_from_table ($name);
 	my $table_name = DBI::Easy::Helper::table_from_package ($qname);
@@ -210,9 +209,10 @@ sub _prepare_entity {
 		if (index ($qname, $qk) == 0) {
 			$db_prefix = $qk;
 			$table_name = DBI::Easy::Helper::table_from_package (substr ($qname, length ($db_prefix)));
+			last;
 		}
 		# $db_prefix = (split /(?=\p{IsUpper}\p{IsLower})/, DBI::Easy::Helper::package_from_table ($qname))[0];
-			
+		
 	}
 	
 	# warn "$name: $qname, $table_name, $db_prefix";
@@ -224,67 +224,34 @@ sub entity {
 	my $self = shift;
 	my $name = shift;
 	
-	my ($qname, $table_name, $db_prefix) = $self->_prepare_entity ($name);
+	# TODO: make cache for entities
 	
-	my $entity_name  = $self->entity_prefix . $db_prefix . 'Record';
-	my $package_name = $self->entity_prefix . $qname;
+	# try to detect entity by prefix
+	my ($qname, $entity_name, $datasource_prefix) = $self->_detect_entity ($name);
 	
-	return $package_name
-		if try_to_use_quiet ($package_name);
+	my $datasource_config = $self->config->{db}->{$datasource_prefix};
 	
-	die "package $package_name compilation failed with error: $@"
-		unless $!;
+	my $datasource_package = $datasource_config->{package} || $self->db_package;
 	
-	my $prefix = substr ($self->entity_prefix, 0, -2);
-	
-	debug "virtual entity creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
-	
-	DBI::Easy::Helper->r (
-		$qname,
-		prefix     => $prefix,
-		entity     => $entity_name,
-		table_name => $table_name,
-	);
+	$datasource_package->entity ($name, $qname, $entity_name, $datasource_prefix);
 }
 
 sub collection {
 	my $self = shift;
 	my $name = shift;
 	
-	# we must initialize entity prior to collection
-	#$self->entity ($name);
-	my $entity_package = $self->entity ($name);
-
-	my ($qname, $table_name, $db_prefix) = $self->_prepare_entity ($name);
+	# TODO: make cache for entities
 	
-	my $entity_name  = $self->entity_prefix . $db_prefix . 'Collection';
-	my $package_name = $self->entity_prefix . $qname . '::Collection';
+	# try to detect entity by prefix
+	my ($qname, $entity_name, $datasource_prefix) = $self->_detect_entity ($name);
 	
-	return $package_name
-		if try_to_use_quiet ($package_name);
+	my $datasource_config = $self->config->{db}->{$datasource_prefix};
 	
-	die "package $package_name compilation failed with error: $@"
-		unless $!;
+	my $datasource_package = $datasource_config->{package} || $self->db_package;
 	
-	my $prefix = substr ($self->entity_prefix, 0, -2);
-        
-	$table_name = $entity_package->table_name
-		if $entity_package->can ('table_name');
-	
-	debug "virtual collection creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
-
-	my @params = (
-		$qname,
-		prefix      => $prefix,
-		entity      => $entity_name,
-		table_name => $table_name,
-	);
-
-	push @params, (column_prefix => $entity_package->column_prefix)
-		if $entity_package->can ('column_prefix');
-		
-	DBI::Easy::Helper->c (@params);
+	$datasource_package->collection ($name, $qname, $entity_name, $datasource_prefix);
 }
+
 
 sub daemon {
 	my $core = shift;

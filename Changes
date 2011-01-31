@@ -1,3 +1,9 @@
+2011-01-31	Ivan Baktsheev <dot.and.thing@gmail.com>
+
+	Release 0.24
+
+	moved RDBMS code to DB package
+
 2010-12-10	Ivan Baktsheev <dot.and.thing@gmail.com>
 
 	Release 0.23
