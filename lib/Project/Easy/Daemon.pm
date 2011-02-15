@@ -35,6 +35,10 @@ sub new {
 	bless $config, $class;
 }
 
+sub startup_script {
+	
+}
+
 sub launch {
 	my $self = shift;
 	
@@ -224,3 +228,68 @@ sub process_command {
 }
 
 1;
+
+__DATA__
+
+########################
+# IO::Easy init.d
+########################
+
+#!/bin/sh
+. /etc/rc.status
+
+PROJ="{$id}"
+
+SU_USER="$PROJ-www"
+{$daemon-env}
+ORACLE_HOME="/opt/oracle/app/product/11gR1/db"
+DAEMON_CMD="perl /www/projects/multiscreen/{$daemon-script}"
+DAEMON_PIDFILE="{$daemon-pid}"
+DAEMON_FLAGS="{$daemon-flags}"
+
+# [ "$DAEMON_PIDFILE" ] || { echo "No directive PidFile: \$DAEMON_PIDFILE"; exit 1; }
+[ -f "$DAEMON_PIDFILE" ] && DAEMON_PID=$(cat "$DAEMON_PIDFILE")
+
+RETVAL=0
+
+perform_daemon() {
+	DAEMON_OPERATION=$1
+	DAEMON_OPERATION_MSG=`echo $DAEMON_OPERATION | tr [a-z] [A-Z]`
+	
+	echo -n $DAEMON_OPERATION_MSG $DAEMON_CMD ": "
+	
+	_CMD="su - $SU_USER -c"
+	
+	if [ "$SU_USER" ] && [ $(id -un) = "$SU_USER" ]; then _CMD="sh -c" ; fi
+	
+	$($CMD "eval $var; $DAEMON_CMD $DAEMON_OPERATION $DAEMON_FLAGS")
+
+	rc_status -v
+	RETVAL=$?
+}
+	
+case "$1" in
+	start)
+	stop)
+	restart)
+	status)
+		perform_daemon $1
+	;;
+	forcestop)
+		echo -n "Force stop: $DAEMON_CMD"
+		pkill -f "$DAEMON_CMD" >/dev/null 2>&1
+		rc_status -v
+		RETVAL=$?
+	;;
+	*)
+		echo "${0##*/} {start|stop|forcestop|restart|status}"
+		RETVAL=1
+esac
+
+exit $RETVAL
+
+########################
+# IO::Easy LaunchDaemon
+########################
+
+FILE2 CONTENTS

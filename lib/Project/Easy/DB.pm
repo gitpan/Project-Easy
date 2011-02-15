@@ -56,26 +56,29 @@ sub entity {
 	my $self = shift;
 	my $name = shift;
 	
-	my ($qname, $table_name, $db_prefix) = @_;
+	my ($entity_name, $ds_path, $ds_entity_name, $ds_config_name) = @_;
 	
-	my $entity_name  = $self->entity_prefix . $db_prefix . 'Record';
-	my $package_name = $self->entity_prefix . $qname;
+	my $ds_package = $::project->entity_prefix . $ds_entity_name . 'Record';
+	my $ds_entity_package = $::project->entity_prefix . $entity_name;
 	
-	return $package_name
-	if try_to_use_quiet ($package_name);
+	my $use_result = try_to_use_quiet ($ds_entity_package);
+	if ($use_result) {
+		debug "entity $ds_entity_package $use_result";
+		return $ds_entity_package
+	}
 	
-	die "package $package_name compilation failed with error: $@"
-	unless $!;
+	die "package $ds_entity_package compilation failed with error: $@"
+		unless $!;
 	
-	my $prefix = substr ($self->entity_prefix, 0, -2);
+	my $prefix = substr ($::project->entity_prefix, 0, -2);
 	
-	debug "virtual entity creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
+	debug "virtual entity creation (prefix => $prefix, datasource entity package => $ds_entity_package, datasource path => $ds_path, datasource package => $ds_package)";
 	
 	DBI::Easy::Helper->r (
-		$qname,
+		$entity_name,
 		prefix     => $prefix,
-		entity     => $entity_name,
-		table_name => $table_name,
+		entity     => $ds_package,
+		table_name => $ds_path,
 	);
 }
 
@@ -83,33 +86,35 @@ sub collection {
 	my $self = shift;
 	my $name = shift;
 	
+	my ($entity_name, $ds_path, $ds_entity_name, $ds_config_name) = @_;
+
 	# we must initialize entity prior to collection
-	#$self->entity ($name);
-	my $entity_package = $self->entity ($name);
+	my $entity_package = $self->entity ($name, $entity_name, $ds_path, $ds_entity_name, $ds_config_name);
 	
-	my ($qname, $table_name, $db_prefix) = @_;
+	my $ds_package = $::project->entity_prefix . $ds_entity_name . 'Collection';
+	my $ds_collection_package = $::project->entity_prefix . $entity_name. '::Collection';
 	
-	my $entity_name  = $self->entity_prefix . $db_prefix . 'Collection';
-	my $package_name = $self->entity_prefix . $qname . '::Collection';
-	
-	return $package_name
-		if try_to_use_quiet ($package_name);
-	
-	die "package $package_name compilation failed with error: $@"
+	my $use_result = try_to_use_quiet ($ds_collection_package);
+	if ($use_result) {
+		debug "collection $ds_collection_package $use_result";
+		return $ds_collection_package;
+	}
+
+	die "package $ds_collection_package compilation failed with error: $@"
 		unless $!;
 	
-	my $prefix = substr ($self->entity_prefix, 0, -2);
+	my $prefix = substr ($::project->entity_prefix, 0, -2);
 	
-	$table_name = $entity_package->table_name
+	$ds_path = $entity_package->table_name
 		if $entity_package->can ('table_name');
 	
-	debug "virtual collection creation (prefix => $prefix, entity => $entity_name, table => $table_name, package => $package_name)";
+	debug "virtual collection creation (prefix => $prefix, datasource collection package => $ds_collection_package, datasource path => $ds_path, datasource package => $ds_package)";
 	
 	my @params = (
-		$qname,
-		prefix      => $prefix,
-		entity      => $entity_name,
-		table_name => $table_name,
+		$entity_name,
+		prefix     => $prefix,
+		entity     => $ds_package,
+		table_name => $ds_path,
 	);
 	
 	push @params, (column_prefix => $entity_package->column_prefix)

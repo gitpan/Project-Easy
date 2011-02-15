@@ -3,10 +3,12 @@ package Project::Easy;
 use Class::Easy;
 use IO::Easy;
 
+use Sys::SigAction;
+
 use Project::Easy::Helper;
 use Project::Easy::Config::File;
 
-our $VERSION = '0.24';
+our $VERSION = '0.26';
 
 # because singleton
 our $singleton = {};
@@ -87,6 +89,8 @@ sub instantiate {
 	my $config = $singleton->config;
 
 	foreach my $db_id (keys %{$config->{db}}) {
+		try_to_use ($config->{db}->{$db_id}->{package})
+			if exists $config->{db}->{$db_id}->{package};
 		make_accessor ($class, "db_$db_id", default => sub {
 			return $class->db ($db_id);
 		});
@@ -196,28 +200,43 @@ sub config {
 sub _detect_entity {
 	my $self = shift;
 	my $name = shift;
+	
+	# here we need to convert supplied name to outstanding format.
+	# name must be in datasource representation (oracle_article) instead of entity (OracleArticle)
+	
+	my $ds = Project::Easy::Helper::table_from_package ($name);
+	
+	# for example: $name = 'oracle_article'
+	# $ds_config_name - datasource name in configuration (oracle)
+	# $ds_path        - for table name in RDBMS (article)
+	# $entity_name    - entity name in perl package name (OracleArticle)
+	# $ds_entity_name - datasource name in perl package name (Oracle)
+	my ($ds_config_name, $ds_path, $entity_name, $ds_entity_name);
+	
+	$ds_config_name = 'default';
+	$ds_entity_name = '';
+	$ds_path        = $ds;
+	$entity_name    = Project::Easy::Helper::package_from_table ($ds);
 
-	# TODO: move methods from DBI::Easy::Helper
-	
-	my $qname      = DBI::Easy::Helper::package_from_table ($name);
-	my $table_name = DBI::Easy::Helper::table_from_package ($qname);
-	
-	my $db_prefix = '';
-	
+	# next, we want to check table name against entity datasource prefixes
 	foreach my $k (grep {!/^default$/} keys %{$self->config->{db}}) {
-		my $qk = DBI::Easy::Helper::package_from_table ($k);
-		if (index ($qname, $qk) == 0) {
-			$db_prefix = $qk;
-			$table_name = DBI::Easy::Helper::table_from_package (substr ($qname, length ($db_prefix)));
-			last;
-		}
-		# $db_prefix = (split /(?=\p{IsUpper}\p{IsLower})/, DBI::Easy::Helper::package_from_table ($qname))[0];
+		# my $qk = Project::Easy::Helper::package_from_table ($k);
 		
+		if (index ($ds, $k) == 0) {
+			my $separator = substr ($ds, length($k), 1);
+			if ($separator eq '_' or $separator eq ':') {
+				$ds_config_name = $k;
+				$ds_entity_name = Project::Easy::Helper::package_from_table ($k);
+				$ds_path        = substr ($ds, length ($k) + 1);
+				$entity_name    = Project::Easy::Helper::package_from_table ($ds);
+				last;
+			}
+		}
 	}
 	
-	# warn "$name: $qname, $table_name, $db_prefix";
+	debug "datasource: $ds, entity name: $entity_name, datasource path: $ds_path, datasource entity name: $ds_entity_name, datasource config key: $ds_config_name";
 	
-	return ($qname, $table_name, $db_prefix);
+	return ($entity_name, $ds_path, $ds_entity_name, $ds_config_name);
 }
 
 sub entity {
@@ -227,13 +246,15 @@ sub entity {
 	# TODO: make cache for entities
 	
 	# try to detect entity by prefix
-	my ($qname, $entity_name, $datasource_prefix) = $self->_detect_entity ($name);
+	my ($entity_name, $ds_path, $ds_entity_name, $ds_config_name) = $self->_detect_entity ($name);
 	
-	my $datasource_config = $self->config->{db}->{$datasource_prefix};
+	my $ds_config = $self->config->{db}->{$ds_config_name};
 	
-	my $datasource_package = $datasource_config->{package} || $self->db_package;
+	my $ds_package = $ds_config->{package} || $self->db_package;
 	
-	$datasource_package->entity ($name, $qname, $entity_name, $datasource_prefix);
+	debug "datasource package: $ds_package";
+	
+	$ds_package->entity ($name, $entity_name, $ds_path, $ds_entity_name, $ds_config_name);
 }
 
 sub collection {
@@ -243,13 +264,15 @@ sub collection {
 	# TODO: make cache for entities
 	
 	# try to detect entity by prefix
-	my ($qname, $entity_name, $datasource_prefix) = $self->_detect_entity ($name);
+	my ($entity_name, $ds_path, $ds_entity_name, $ds_config_name) = $self->_detect_entity ($name);
 	
-	my $datasource_config = $self->config->{db}->{$datasource_prefix};
+	my $ds_config = $self->config->{db}->{$ds_config_name};
 	
-	my $datasource_package = $datasource_config->{package} || $self->db_package;
+	my $ds_package = $ds_config->{package} || $self->db_package;
 	
-	$datasource_package->collection ($name, $qname, $entity_name, $datasource_prefix);
+	debug "datasource package: $ds_package";
+	
+	$ds_package->collection ($name, $entity_name, $ds_path, $ds_entity_name, $ds_config_name);
 }
 
 
@@ -279,37 +302,58 @@ sub db { # TODO: rewrite using alert
 			debug '%%%%%%%%%%%%%%%%%%%%%% DBI ERROR: we relaunch connection %%%%%%%%%%%%%%%%%%%%%%%%';
 			debug 'ERROR: ', $@;
 			
-			my $old_dbh = delete $current_db->{$$};
-
-			$old_dbh->disconnect
-				if $old_dbh;
-
-			$current_db->{$$} = $db_package->new ($core, $type);
-			$current_db->{ts}->{$$} = time;
+			$class->_connect_db ($current_db, $db_package, $type, 1);
 			
 			return $class->db ($type);
 		};
 		
 		my $t = timer ("database handle start");
-		$current_db->{$$} = $db_package->new ($core, $type);
-		$current_db->{ts}->{$$} = time;
+
+		$class->_connect_db ($current_db, $db_package, $type);
+
 		$t->end;
 		
 	}
 	
-	# we reconnect every hour
-	if ((time - $current_db->{ts}->{$$}) > 3600) {
-		my $old_dbh = delete $current_db->{$$};
-		
-		$old_dbh->disconnect
-			if $old_dbh;
-		
-		$current_db->{$$} = $db_package->new ($core, $type);
-		$current_db->{ts}->{$$} = time;
+	# we reconnect every hour for morning bug by default
+	my $force_reconnect = $core->config->{db}->{$type}->{force_reconnect};
+	$force_reconnect = 0
+		unless defined $force_reconnect;
+	$force_reconnect = 3600
+		if $force_reconnect != 0 and $force_reconnect < 3600;
+	if ($force_reconnect != 0 and (time - $current_db->{ts}->{$$}) > $force_reconnect) {
+		debug "forced reconnect";
+		$class->_connect_db ($current_db, $db_package, $type, 1);
 	}
 	
 	return $current_db->{$$};
 	
+}
+
+sub _connect_db {
+	my $class = shift;
+	my ($current_db, $db_package, $type, $disconnect) = @_;
+	
+	my $core = $class->singleton;
+	
+	my $old_dbh = delete $current_db->{$$};
+
+	if (defined $disconnect and $disconnect) {
+		eval {
+			my $h = Sys::SigAction::set_sig_handler('ALRM', sub {
+				# failed disconnect is safe solution
+				die;
+			});
+			alarm (2);
+			$old_dbh->disconnect
+				if $old_dbh;
+			alarm (0);
+		};
+	}
+
+	$current_db->{$$} = $db_package->new ($core, $type);
+	$current_db->{ts}->{$$} = time;
+
 }
 
 

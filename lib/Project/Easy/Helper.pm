@@ -540,6 +540,18 @@ sub _script_wrapper {
 	return @result;
 }
 
+sub table_from_package {
+	my $entity = shift;
+	
+	lc join ('_', split /(?=\p{IsUpper}\p{IsLower})/, $entity);
+}
+
+sub package_from_table {
+	my $table = shift;
+	
+	join '', map {ucfirst} split /_/, $table;
+}
+
 
 1;
 
