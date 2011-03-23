@@ -8,7 +8,7 @@ use Sys::SigAction;
 use Project::Easy::Helper;
 use Project::Easy::Config::File;
 
-our $VERSION = '0.26';
+our $VERSION = '0.27';
 
 # because singleton
 our $singleton = {};
@@ -88,11 +88,25 @@ sub instantiate {
 
 	my $config = $singleton->config;
 
-	foreach my $db_id (keys %{$config->{db}}) {
-		try_to_use ($config->{db}->{$db_id}->{package})
-			if exists $config->{db}->{$db_id}->{package};
-		make_accessor ($class, "db_$db_id", default => sub {
-			return $class->db ($db_id);
+	foreach my $datasource (keys %{$config->{db}}) {
+		my $datasource_package = $config->{db}->{$datasource}->{package};
+		
+		if (defined $datasource_package) {
+			try_to_use ($datasource_package);
+		}
+		
+		# now we must sure to entities packages available
+		# and create new ones, if unavailable
+
+		if (defined $datasource_package and $datasource_package->can ('create_entity')) {
+			$datasource_package->can ('create_entity')->($class, $class->root, $datasource);
+		} else {
+			Project::Easy::Helper->can ('create_entity')->($class, $class->root, $datasource);
+		}
+		
+
+		make_accessor ($class, "db_$datasource", default => sub {
+			return $class->db ($datasource);
 		});
 	}
 	
@@ -129,14 +143,21 @@ sub detect_environment {
 	
 	my $distro_path = $root->append ('var', 'distribution');
 	
-	die "\$project_root/var/distribution not found"
+	my @fixups = ();
+	$root->dir_io ('etc')->scan_tree (sub {my $f = shift; push @fixups, $f->name if -d $f});
+	
+	my $ending = ". probably you want to set " 
+		. $distro_path->abs_path . ' contents to fixup config dir (available fixups: '
+		. join (', ', @fixups).').';
+	
+	die "distribution file not found" . $ending
 		unless -f $distro_path;
 	
 	my $distro_string = $distro_path->as_file->contents;
 	
 	chomp $distro_string;
 
-	die "can't recognise distribution '$distro_string'"
+	die "can't recognise distribution '$distro_string'" . $ending
 		unless $distro_string;
 	
 	my ($distro, $fixup_core) = split (/:/, $distro_string, 2);
@@ -146,7 +167,7 @@ sub detect_environment {
 	
 	my $fixup_path = $class->fixup_path_distro;
 
-	die "can't locate fixup config file at '$fixup_path'"
+	die "can't locate fixup config file at '$fixup_path'" . $ending
 		unless -f $fixup_path;
 	
 	make_accessor ($class, 'fixup_path', default => $fixup_path);

@@ -19,6 +19,7 @@ WriteMakefile(
 		'IO::Easy'    => '0.13',
 		'Class::Easy' => '0.11',
 		'DBI::Easy'   => '0.17',
-		'JSON'        => '2.16',
+		'JSON'        => '2.51',
+		'Sys::SigAction' => '0.11'
 	}
 );

@@ -100,35 +100,7 @@ our \@paths = qw(
 	my $t = $root->append ('t')->as_dir;
 	$t->create;
 	
-	my @namespace_chunks = split /\:\:/, $namespace;
-	
-	# here we must create default entity classes
-	my $project_lib = $root->append ('lib', @namespace_chunks, 'Entity');
-	$project_lib->as_dir->create;
-
-	my $entity_template = $data_files->{'Entity.pm'};
-
-	my $entity_pm = Project::Easy::Config::string_from_template (
-		$entity_template,
-		{
-			%$data,
-			scope => 'Record',
-			dbi_easy_scope => 'Record'
-		}
-	);
-
-	$project_lib->append ('Record.pm')->as_file->store ($entity_pm);
-
-	$entity_pm = Project::Easy::Config::string_from_template (
-		$entity_template,
-		{
-			%$data,
-			scope => 'Collection',
-			dbi_easy_scope => 'Record::Collection'
-		}
-	);
-
-	$project_lib->append ('Collection.pm')->as_file->store ($entity_pm);
+	create_entity ($namespace, $root, 'default');
 	
 	# adding sqlite database (sqlite is dependency for dbi::easy)
 	
@@ -157,6 +129,56 @@ our \@paths = qw(
 	# TODO: be more user-friendly: show help after finish
 	
 	
+}
+
+sub create_entity {
+	my $namespace = shift;
+	my $root       = shift;
+	my $datasource = shift;
+	
+	if (defined $::project) {
+		$namespace = $::project;
+	}
+
+	my @namespace_chunks = split /\:\:/, $namespace;
+	
+	# here we must create default entity classes
+	my $project_lib = $root->dir_io ('lib', @namespace_chunks, 'Entity');
+	$project_lib->create;
+	
+	my $scope_prefix = '';
+	if ($datasource ne 'default') {
+		$scope_prefix = ($namespace->_detect_entity ("${datasource}_test"))[2];
+	}
+	
+	my $data_files = file->__data__files;
+
+	my $entity_template = $data_files->{'Entity.pm'};
+
+	my $entity_pm = Project::Easy::Config::string_from_template (
+		$entity_template,
+		{
+			namespace => $namespace,
+			scope => $scope_prefix.'Record', # 
+			dbi_easy_scope => 'Record',
+			datasource => $datasource
+		}
+	);
+
+	$project_lib->append ("${scope_prefix}Record.pm")->as_file->store_if_empty ($entity_pm);
+
+	$entity_pm = Project::Easy::Config::string_from_template (
+		$entity_template,
+		{
+			namespace => $namespace,
+			scope => $scope_prefix.'Collection', #
+			dbi_easy_scope => 'Record::Collection',
+			datasource => $datasource
+		}
+	);
+
+	$project_lib->append ("${scope_prefix}Collection.pm")->as_file->store_if_empty ($entity_pm);
+
 }
 
 sub create_var {
@@ -194,17 +216,8 @@ sub status {
 		($project_class, $libs) = &_script_wrapper;
 	};
 	
-	my $distro_not_found = '\$project_root/var/distribution not found';
-	
-	if ($@ =~ /^$distro_not_found/) {
-		# we need to show user an option to replay project configuration
-		
+	if ($@) {
 		&status_fail ($project_class, $libs);
-		
-		die "$distro_not_found;
-probably you have cloned or checked out project from repository;
-if that's right, please run this command with --fix option to fix environment";
-	} elsif ($@) {
 		die $@;
 	}
 	
@@ -552,7 +565,6 @@ sub package_from_table {
 	join '', map {ucfirst} split /_/, $table;
 }
 
-
 1;
 
 
@@ -604,7 +616,7 @@ our $wrapper = 1;
 sub _init_db {
 	my $self = shift;
 	
-	$self->dbh ($::project->can ('db_default'));
+	$self->dbh ($::project->can ('db_{$datasource}'));
 }
 
 1;
@@ -663,6 +675,28 @@ Example (add new database config "local_test_db_id" with mysql template) :
 		"AutoCommit": 1,
 		"ShowErrorStatement": 1
 	}
+}
+
+########################################
+# IO::Easy::File template-db.oracle
+########################################
+
+{
+	"user": null,
+	"pass": null,
+	"driver_name": "oracle",
+	"options" : {
+		"AutoCommit" : 1,
+		"ShowErrorStatement" : 0,
+		"RaiseError" : 1,
+		"PrintError" : 0,
+		"LongReadLen" : 1024288,
+		"LongTruncOk" : 1,
+		"ora_charset" : "AL32UTF8"
+	},
+	"do_after_connect" : [
+		"alter session set nls_date_format='yyyy-mm-dd hh24:mi:ss'"
+	],
 }
 
 ########################################

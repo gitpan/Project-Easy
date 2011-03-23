@@ -22,18 +22,21 @@ sub updatedb {
 	my $mode = 'update';
 	my $clean = 0;
 	my $schema_file;
+	my $datasource = 'default';
 	
 	GetOptions (
 		'h|help'        => sub { &help },
 		'install'       => sub {$mode = 'install'},
 		'clean'         => \$clean,
 		'schema_file=s' => \$schema_file,
+		'datasource=s'  => \$datasource
 	);
 	
 	update_schema (
 		mode  => $mode,
 		clean => $clean,
-		schema_file => $schema_file
+		schema_file => $schema_file,
+		datasource => $datasource
 	);
 	
 }
@@ -42,9 +45,9 @@ sub updatedb {
 sub update_schema {
 	my $settings = {@_};
 	
-	my $mode  = $settings->{mode}  || 'update';
-	my $clean = $settings->{clean} || 0;
-	my $db    = $settings->{db}    || 'default';
+	my $mode  = $settings->{mode}       || 'update';
+	my $clean = $settings->{clean}      || 0;
+	my $db    = $settings->{datasource} || 'default';
 	
 	my $dbh         = $settings->{dbh};
 	my $schema_file = $settings->{schema_file};
