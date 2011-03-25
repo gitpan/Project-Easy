@@ -3,12 +3,21 @@ package Project::Easy;
 use Class::Easy;
 use IO::Easy;
 
-use Sys::SigAction;
+unless ($^O eq 'MSWin32') {
+	try_to_use 'Sys::SigAction';
+}
+
+# these constants must be available prior to the helper use
+BEGIN {
+	our $VERSION = '0.28';
+
+	has etc => 'etc'; # conf, config
+	has bin => 'bin'; # scripts, tools
+	has t   => 't';   # test, tests
+};
 
 use Project::Easy::Helper;
 use Project::Easy::Config::File;
-
-our $VERSION = '0.27';
 
 # because singleton
 our $singleton = {};
@@ -22,9 +31,6 @@ has 'daemons', default => {};
 has 'daemon_package', default => 'Project::Easy::Daemon';
 has 'db_package',     default => 'Project::Easy::DB';
 has 'conf_package',   default => 'Project::Easy::Config';
-
-has 'etc', default => 'etc';
-has 'bin', default => 'bin';
 
 sub import {
 	my $pack = shift;
@@ -144,7 +150,7 @@ sub detect_environment {
 	my $distro_path = $root->append ('var', 'distribution');
 	
 	my @fixups = ();
-	$root->dir_io ('etc')->scan_tree (sub {my $f = shift; push @fixups, $f->name if -d $f});
+	$root->dir_io ($class->etc)->scan_tree (sub {my $f = shift; push @fixups, $f->name if -d $f});
 	
 	my $ending = ". probably you want to set " 
 		. $distro_path->abs_path . ' contents to fixup config dir (available fixups: '
@@ -360,15 +366,21 @@ sub _connect_db {
 	my $old_dbh = delete $current_db->{$$};
 
 	if (defined $disconnect and $disconnect) {
+		# basic windows support
 		eval {
-			my $h = Sys::SigAction::set_sig_handler('ALRM', sub {
-				# failed disconnect is safe solution
-				die;
-			});
-			alarm (2);
+			if ($^O ne 'MSWin32') {
+				my $h = Sys::SigAction::set_sig_handler('ALRM', sub {
+					# failed disconnect is safe solution
+					die;
+				});
+				alarm (2);
+			}
+			
 			$old_dbh->disconnect
 				if $old_dbh;
-			alarm (0);
+			
+			alarm (0)
+				if $^O ne 'MSWin32';
 		};
 	}
 

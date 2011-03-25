@@ -16,10 +16,11 @@ WriteMakefile(
 		},
 	},
 	PREREQ_PM => {
-		'IO::Easy'    => '0.13',
-		'Class::Easy' => '0.11',
+		'IO::Easy'    => '0.14',
+		'Class::Easy' => '0.13',
 		'DBI::Easy'   => '0.17',
 		'JSON'        => '2.51',
-		'Sys::SigAction' => '0.11'
+		# hello, windows
+		($^O eq 'MSWin32' ? () : ('Sys::SigAction' => '0.11'))
 	}
 );

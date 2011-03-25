@@ -6,10 +6,16 @@ use IO::Easy;
 
 use Time::Piece;
 
-use Project::Easy::Config;
-use Project::Easy::Helper::DB;
+require Project::Easy;
 
-our @scriptable = (qw(status config updatedb));
+use Project::Easy::Config;
+
+use Project::Easy::Helper::DB;
+use Project::Easy::Helper::Status;
+use Project::Easy::Helper::Config;
+use Project::Easy::Helper::Console;
+
+our @scriptable = (qw(status config updatedb console));
 
 sub ::initialize {
 	my $params = \@_;
@@ -55,24 +61,10 @@ sub ::initialize {
 	$class_file->store_if_empty ($project_pm);
 	
 	# ok, project skeleton created. now we need to create 'bin' dir
-	my $bin = $root->append ('bin')->as_dir;
-	$bin->create;
+	$root->dir_io ('bin')->create;
 	
 	# now we create several perl scripts to complete installation 
-	foreach (@scriptable) {
-		my $script = $bin->append ($_)->as_file;
-
-		my $script_contents = Project::Easy::Config::string_from_template (
-			$data_files->{'script.template'},
-			{script_name => $_}
-		);
-
-		$script->store_if_empty ($script_contents);
-		
-		warn  "can't chmod " . $script->path
-			unless chmod 0755, $script->path;
-		
-	}
+	create_scripts ($root, $data_files);
 	
 	# ok, project skeleton created. now we need to create config
 	my $etc = $root->append ('etc')->as_dir;
@@ -129,6 +121,27 @@ our \@paths = qw(
 	# TODO: be more user-friendly: show help after finish
 	
 	
+}
+
+sub create_scripts {
+	my $root       = shift;
+	my $data_files = shift;
+
+	foreach (@scriptable) {
+		my $script = $root->file_io ('bin', $_);
+
+		my $script_contents = Project::Easy::Config::string_from_template (
+			$data_files->{'script.template'},
+			{script_name => $_}
+		);
+
+		$script->store_if_empty ($script_contents);
+		
+		warn  "can't chmod " . $script->path
+			unless chmod 0755, $script->path;
+		
+	}
+
 }
 
 sub create_entity {
@@ -191,136 +204,6 @@ sub create_var {
 	return $var;
 }
 
-sub run_script {
-	my $script = shift;
-	my $path   = shift;
-	
-	# print `$script`;
-	
-	my $res = $? >> 8;
-	if ($res == 0) {
-		debug $path, " … OK\n";
-	} elsif ($res == 255) {
-		warn $path, " … DIED\n";
-		exit;
-	} else {
-		warn $path, " … FAILED $res TESTS\n";
-		exit;
-	}
-}
-
-sub status {
-	my ($project_class, $libs);
-	
-	eval {
-		($project_class, $libs) = &_script_wrapper;
-	};
-	
-	if ($@) {
-		&status_fail ($project_class, $libs);
-		die $@;
-	}
-	
-	return &status_ok ($project_class, $libs);
-	
-}
-
-sub status_fail {
-	my ($project_class, $libs, $params) = @_;
-	
-	my $root = $project_class->root;
-	
-	# here we must recreate var directories
-	# TODO: make it by Project::Easy::Helper service 'install' routine
-	
-	my $global_config = $project_class->conf_path->deserialize;
-}
-
-sub status_ok {
-	my ($pack, $libs, $params) = @_;
-	
-	my $root = $pack->root;
-	
-	my $lib_dir = $root->append ('lib')->as_dir;
-	
-	my $includes = join ' ', map {"-I$_"} (@$libs, @INC);
-	
-	my $files = [];
-	my $all_uses = {};
-	my $all_packs = {};
-	
-	$lib_dir->scan_tree (sub {
-		my $file = shift;
-		
-		return 1 if $file->type eq 'dir';
-		
-		if ($file =~ /\.pm$/) {
-			push @$files, $file;
-			my $content = $file->contents;
-
-			while ($content =~ m/^(use|package) ([^\$\;\s]+)/igms){
-				if ($1 eq 'use') {
-					$all_uses->{$2} = $file;
-				} else {
-					$all_packs->{$2} = $file;
-				}
-			}
-		}
-	});
-	
-	foreach (keys %$all_uses) {
-		delete $all_uses->{$_}
-			if /^[a-z][a-z0-9]+$/;
-	}
-	
-	my $failed   = {};
-	my $external = {};
-	
-	# here we try to find dependencies
-	foreach (keys %$all_uses) {
-		$external->{$_} = $all_uses->{$_}
-			unless exists $all_packs->{$_};
-		
-		$failed->{$_} = $all_uses->{$_}
-			if ! try_to_use ($_) and ! exists $all_packs->{$_};
-	}
-	
-	debug "external modules: ", join (' ', sort keys %$external), "\n";
-	
-	warn "requirements not satisfied. you must install these modules:\ncpan -i ",
-		join (' ', sort keys %$failed), "\n"
-			if scalar keys %$failed;
-	
-	foreach my $file (@$files) {
-		my $abs_path = $file->abs_path;
-		my $rel_path = $file->rel_path ($root->rel_path);
-
-		# warn "$^X -c $includes $abs_path";
-		
-		print run_script ("$^X -c $includes $abs_path", $rel_path);
-		
-	}
-
-	my $test_dir = $root->append ('t')->as_dir;
-	
-	$test_dir->scan_tree (sub {
-		my $file = shift;
-		
-		return 1
-			if $file->type eq 'dir';
-		
-		if ($file =~ /\.(?:t|pl)$/) {
-			my $path = $file->abs_path;
-			
-			print run_script ("$^X $includes $path", $path);
-		}
-	});
-	
-	print "SUCCESS\n";
-	
-	return $pack;
-}
-
 sub shell {
 	my ($pack, $libs) = &_script_wrapper;
 	
@@ -350,112 +233,6 @@ sub shell {
 	eval "END { ReadMode('restore') };";
 	$ssh->shell;
 
-}
-
-sub config {
-	
-	my @params = @ARGV;
-	@params = @_
-		if scalar @_;
-	
-	my ($package, $libs) = &_script_wrapper(); # Project name and "libs" path
-	
-	my $core   = $package->singleton;  # Project singleton
-	my $config = $core->config;
-	
-	my $templates = file->__data__files ();   # Got all "data files" at end of file
-
-	my ($key, $command, @remains) = @params;
-	
-	unless (defined $key) {
-		print $templates->{'config-usage'}, "\n";
-		return;
-	}
-	
-	#  $key      = "key1.key2.key3..."
-	#  $key_eval = "{key1}->{key2}->{key3}..."
-	my $key_path = "{" . join ('}->{', split (/\./, $key)) . '}';
-	my $key_eval = "\$config->$key_path";
-
-	my $struct     = eval $key_eval;
-	my $ref_struct = ref $struct;
-
-	if (!defined $command or ($command eq 'dump' and !$ref_struct)) {
-		print "'$key' => ";
-		
-		if ($ref_struct eq 'HASH') {
-			print "HASH with keys: ", join ', ', keys %$struct;
-		
-		} elsif ($ref_struct eq 'ARRAY') {
-			print "ARRAY of ", scalar @$struct;
-		
-		} elsif (!$ref_struct) {
-			print "'", (defined $struct ? $struct : 'null'), "'";
-		}
-		print "\n";
-		return 1;
-	}
-
-	my $conf_package = $package->conf_package;		# Project::Easy::Config
-
-	# Init serializer to parse config file
-	my $serializer_json = $conf_package->serializer ('json');
-	
-	if ($command =~ /^(?:--)?dump$/) {
-		print "'$key' => ";
-		print $serializer_json->dump_struct ($struct);
-		print "\n";
-		return 1;
-	}
-	
-	# set or = can: create new key (any depth), modify existing
-	# template can: create new key (any depth)
-	if ($command eq 'set' or $command eq '=' or $command eq 'template') {
-		
-		die "you must supply value for modify config"
-			unless scalar @remains;
-		
-		# check for legitimity
-		die "you cannot set/template complex value such as HASH/ARRAY. remove old key first"
-			if $ref_struct;
-		
-		die "you cannot update scalar value with template. remove old key first"
-			if $command eq 'template' and defined $struct; # any setter
-		
-		# patch creation for config files
-		
-		my $fixup_struct = {};
-		
-		if ($command eq 'template') {
-
-			my $template = $serializer_json->parse_string (
-				$templates->{'template-' . $remains[0]}
-			);
-			
-			eval "\$fixup_struct->$key_path = \$template";
-		} else {
-			eval "\$fixup_struct->$key_path = \$remains[0]";
-		}
-        
-		
-		# storing modified config
-
-		# Global config absolute path
-		my $global_config_file = $core->conf_path;
-		$global_config_file->patch ($fixup_struct, 'undef_keys_in_patch');
-        #warn(Dumper($global_config_file->contents));
-		
-        # Local config absolute path
-		my $local_config_file  = $core->fixup_path_distro ($core->distro);
-		$local_config_file->patch ($fixup_struct);
-        #warn(Dumper($local_config_file->contents));
-
-		return 1;
-	}
-
-	print $templates->{'config-usage'}, "\n";
-	
-	return;
 }
 
 sub _script_wrapper {
@@ -498,6 +275,7 @@ sub _script_wrapper {
 		$lib_path   = $root->dir_io ("lib");
 		
 	} elsif ($local_conf->name eq 'project-easy' and $local_conf->parent->name eq 'etc') {
+		# TODO: use etc method from project package
 		$root = $local_conf->parent->parent;
 		$lib_path = $local_conf->parent->parent->dir_io ('lib');
 	} else {

@@ -10,6 +10,9 @@ lib/Project/Easy/DB.pm
 lib/Project/Easy/Distribution.pm
 lib/Project/Easy/Helper.pm
 lib/Project/Easy/Helper/DB.pm
+lib/Project/Easy/Helper/Status.pm
+lib/Project/Easy/Helper/Config.pm
+lib/Project/Easy/Helper/Console.pm
 Makefile.PL
 MANIFEST
 META.yml			Module meta-data (added by MakeMaker)

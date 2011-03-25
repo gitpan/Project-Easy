@@ -4,7 +4,7 @@ use Class::Easy;
 
 BEGIN {
 	use Class::Easy;
-	$Class::Easy::DEBUG = 'immediately';
+	logger ('debug')->appender (*STDERR);
 	use IO::Easy;
 	unshift @INC, dir->current->dir_io('lib')->path;
 

@@ -1,3 +1,14 @@
+2011-03-26	Ivan Baktsheev <dot.and.thing@gmail.com>
+
+	Release 0.28
+
+	class-easy new logging system
+	automatic creation of entity packages and scripts
+	helper: little refactoring
+	helper: datasource selection in updatedb
+	helper: oracle db template
+	sys::sigaction usage for db connections
+
 2011-02-07	Ivan Baktsheev <dot.and.thing@gmail.com>
 
 	Release 0.25

@@ -9,10 +9,10 @@ has 'pid_file';
 has 'code';
 
 sub new {
-	my $class    = shift;
+	my $class     = shift;
 	my $singleton = shift;
-	my $code     = shift;
-	my $config   = shift;
+	my $code      = shift;
+	my $config    = shift;
 	
 	my $root = $singleton->root;
 	my $id   = $singleton->id;
@@ -232,7 +232,7 @@ sub process_command {
 __DATA__
 
 ########################
-# IO::Easy init.d
+# IO::Easy startup.linux
 ########################
 
 #!/bin/sh
@@ -240,10 +240,10 @@ __DATA__
 
 PROJ="{$id}"
 
-SU_USER="$PROJ-www"
+SU_USER="{$daemon-user}"
+SU_GROUP="{$daemon-group}"
 {$daemon-env}
-ORACLE_HOME="/opt/oracle/app/product/11gR1/db"
-DAEMON_CMD="perl /www/projects/multiscreen/{$daemon-script}"
+DAEMON_CMD="{$project-root}/bin/{$daemon-script}"
 DAEMON_PIDFILE="{$daemon-pid}"
 DAEMON_FLAGS="{$daemon-flags}"
 
@@ -289,7 +289,7 @@ esac
 exit $RETVAL
 
 ########################
-# IO::Easy LaunchDaemon
+# IO::Easy startup.darwin
 ########################
 
 FILE2 CONTENTS
