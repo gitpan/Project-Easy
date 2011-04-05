@@ -100,7 +100,7 @@ sub update_schema {
 		};
 
 		unless ($schema_version) {
-			critical "can't fetch db_schema version, statement: $ver_get ['$ver_fld']";
+			die "can't fetch db_schema version, statement: $ver_get ['$ver_fld']. if you want to init database, please use --install\n";
 		}
 
 	} elsif ($mode eq 'install') {

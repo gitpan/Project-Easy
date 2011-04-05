@@ -1,3 +1,10 @@
+2011-04-05	Ivan Baktsheev <dot.and.thing@gmail.com>
+
+	Release 0.29
+
+	add proper message for updatedb before project init
+	fix regression with bin/status
+
 2011-03-26	Ivan Baktsheev <dot.and.thing@gmail.com>
 
 	Release 0.28

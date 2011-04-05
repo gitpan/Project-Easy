@@ -9,7 +9,7 @@ unless ($^O eq 'MSWin32') {
 
 # these constants must be available prior to the helper use
 BEGIN {
-	our $VERSION = '0.28';
+	our $VERSION = '0.29';
 
 	has etc => 'etc'; # conf, config
 	has bin => 'bin'; # scripts, tools
@@ -154,7 +154,7 @@ sub detect_environment {
 	
 	my $ending = ". probably you want to set " 
 		. $distro_path->abs_path . ' contents to fixup config dir (available fixups: '
-		. join (', ', @fixups).').';
+		. join (', ', @fixups).")\n";
 	
 	die "distribution file not found" . $ending
 		unless -f $distro_path;

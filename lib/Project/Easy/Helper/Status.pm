@@ -40,12 +40,12 @@ sub status {
 sub status_fail {
 	my ($project_class, $libs, $params) = @_;
 	
-	my $root = $project_class->root;
+	# my $root = $project_class->root;
 	
 	# here we must recreate var directories
 	# TODO: make it by Project::Easy::Helper service 'install' routine
 	
-	my $global_config = $project_class->conf_path->deserialize;
+	# my $global_config = $project_class->conf_path->deserialize;
 }
 
 sub status_ok {
@@ -128,7 +128,7 @@ sub status_ok {
 		if ($file =~ /\.(?:t|pl)$/) {
 			my $path = $file->abs_path;
 			
-			print run_script ("$^X $includes $path", $path);
+			run_script ("$^X $includes $path", $path);
 		}
 	});
 	
