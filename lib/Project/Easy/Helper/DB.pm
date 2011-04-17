@@ -80,15 +80,20 @@ sub update_schema {
 		my $pack_conf = $pack->config->{db}->{$db};
 		my $pack_sql  = $pack_conf->{update_sql};
 
-		$schema_file = $pack_conf->{update};
+		warn "no update file for datasource '$db'", return
+			unless defined $pack_conf->{update};
 
+		$schema_file = $pack->root->file_io ($pack_conf->{update});
+		
 		$ver_get = $pack_sql->{'ver_get'} if $pack_sql->{'ver_get'};
 		$ver_upd = $pack_sql->{'ver_upd'} if $pack_sql->{'ver_upd'};
 		$ver_ins = $pack_sql->{'ver_ins'} if $pack_sql->{'ver_ins'};
 
-		$ver_fld = $pack_conf->{'schema_variable'} if $pack_conf->{'schema_variable'};
+		$ver_fld = $pack_conf->{'schema_variable'}
+			if $pack_conf->{'schema_variable'};
 
-		$can_created = $pack_conf->{'can_be_created'} if $pack_conf->{'can_be_created'};
+		$can_created = $pack_conf->{'can_be_created'}
+			if $pack_conf->{'can_be_created'};
 	}
 	
 	my $schema_version;
@@ -100,7 +105,8 @@ sub update_schema {
 		};
 
 		unless ($schema_version) {
-			die "can't fetch db_schema version, statement: $ver_get ['$ver_fld']. if you want to init database, please use --install\n";
+			die "can't fetch db_schema version, statement: $ver_get ['$ver_fld'].
+if you want to init database, please use 'bin/updatedb --install'\n";
 		}
 
 	} elsif ($mode eq 'install') {
@@ -149,6 +155,15 @@ sub update_schema {
 
 	close SCHEMA;
 	
+	if (! defined $latest_version or $latest_version eq '') {
+		$latest_version = $schema_version;
+	}
+	
+	if ($settings->{dry_run}) {
+		my $version = {db => $schema_version, schema => $latest_version};
+		return $version;
+	}
+	
 	if ($mode eq 'install' and $clean) {
 		print "\nWARNING!\n\nthese strings applied to database before installing new schema:\n",
 			join "\n", @cleaning,
@@ -160,7 +175,7 @@ sub update_schema {
 		@cleaning = ();
 	}
 	
-	if (! defined $latest_version or $latest_version eq '' or $schema_version eq $latest_version) {
+	if ($schema_version eq $latest_version) {
 		print "no updates, db schema version: $schema_version\n";
 		return;
 	}

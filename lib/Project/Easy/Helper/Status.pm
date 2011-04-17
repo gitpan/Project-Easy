@@ -6,16 +6,16 @@ sub run_script {
 	my $script = shift;
 	my $path   = shift;
 	
-	# print `$script`;
+	my $out = `$script 2>&1`;
 	
 	my $res = $? >> 8;
 	if ($res == 0) {
 		debug $path, " … OK\n";
 	} elsif ($res == 255) {
-		warn $path, " … DIED\n";
+		warn $out, $path, " … DIED\n";
 		exit;
 	} else {
-		warn $path, " … FAILED $res TESTS\n";
+		warn $out, $path, " … FAILED $res TESTS\n";
 		exit;
 	}
 }
@@ -108,31 +108,57 @@ sub status_ok {
 			if scalar keys %$failed;
 	
 	foreach my $file (@$files) {
-		my $abs_path = $file->abs_path;
-		my $rel_path = $file->rel_path ($root->rel_path);
+		my $abs_path     = $file->abs_path;
+		my $rel_path     = $file->rel_path ((ref $root)->current->abs_path);
+		my $project_path = $file->rel_path ($root->abs_path);
 
-		# warn "$^X -c $includes $abs_path";
+		# warn "$^X -c $rel_path";
 		
-		print run_script ("$^X -c $includes $abs_path", $rel_path);
+		run_script ("$^X $includes -c $abs_path", $rel_path);
 		
 	}
 
+	# TODO: move db check code to unit
+	
+	my $db_outdated = 0;
+	
+	foreach my $datasource (keys %{$pack->config->{db}}) {
+		my $ver;
+		eval {$ver = update_schema (datasource => $datasource, dry_run => 1);};
+		
+		next
+			unless defined $ver; # if update file not defined
+		
+		die "datasource '$datasource' error: $@"
+			if $@;
+		
+		if (!$@ and ($ver->{db} ne $ver->{schema})) {
+			warn "datasource '$datasource' out-of-date: db ($ver->{db}) vs. schema file ($ver->{schema})\n";
+			$db_outdated = 1;
+		}
+	}
+
+	warn "please update db using: 'bin/updatedb --datasource=<datasource name>'\n"
+		if $db_outdated;
+
 	my $test_dir = $root->append ('t')->as_dir;
 	
-	$test_dir->scan_tree (sub {
-		my $file = shift;
-		
-		return 1
-			if $file->type eq 'dir';
-		
-		if ($file =~ /\.(?:t|pl)$/) {
-			my $path = $file->abs_path;
+	if (-d $test_dir) {
+		$test_dir->scan_tree (sub {
+			my $file = shift;
 			
-			run_script ("$^X $includes $path", $path);
-		}
-	});
+			return 1
+				if $file->type eq 'dir';
+			
+			if ($file =~ /\.(?:t|pl)$/) {
+				my $path = $file->abs_path;
+				
+				run_script ("$^X $includes $path", $path);
+			}
+		});
+	}
 	
-	print "SUCCESS\n";
+	print "OK\n";
 	
 	return $pack;
 }

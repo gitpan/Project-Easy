@@ -1,3 +1,15 @@
+2011-04-17	Ivan Baktsheev <dot.and.thing@gmail.com>
+
+	Release 0.30
+
+	edit config using -e, support --(global|project) for writing config values
+	fix for regression on project modules compilation
+	daemon scripts autogeneration
+	renamed distribution => instance
+	script related imports
+	support for new Class::Easy
+	bugfix
+
 2011-04-05	Ivan Baktsheev <dot.and.thing@gmail.com>
 
 	Release 0.29

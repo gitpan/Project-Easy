@@ -50,7 +50,7 @@ ok (-f $root->append ('lib', $path), 'libraries available');
 
 # SIMULATION: bin/status
 
-ok `$^X -I$lib bin/status` =~ /SUCCESS/ms;
+ok `$^X -I$lib bin/status` =~ /OK/ms;
 
 # ok (Project::Easy::Helper::status);
 
@@ -80,14 +80,13 @@ $update_status = `$^X -I$lib bin/config db.sqlite.attributes.dbname = $root/var/
 $update_status = `$^X -I$lib bin/config db.sqlite.update = $schema_file`;
 
 $schema_file->parent->create;
-	$schema_file->store (
-		"--- $date\ncreate table var (var_name text, var_value text);\n".
-		"--- $date.15\ncreate table list (list_id integer primary key, list_title text, list_meta text);\n"
-	);
+$schema_file->store (
+	"--- $date\ncreate table var (var_name text, var_value text);\n".
+	"--- $date.15\ncreate table list (list_id integer primary key, list_title text, list_meta text);\n"
+);
 
 $update_status = `$^X -I$lib bin/updatedb --install --datasource=sqlite`;
 ok $update_status =~ /done$/ms;
-
 
 my $test_contents = '
 #!/usr/bin/perl
@@ -95,7 +94,7 @@ my $test_contents = '
 use Project::Easy qw(script);
 
 BEGIN {
-	# use IO::Easy;
+	use IO::Easy;
 	unshift @INC, dir->current->dir_io("lib")->path;
 
 	use Test::More qw(no_plan);
@@ -146,7 +145,7 @@ $project_root->file_io (qw(t 001.t))->store ($test_contents);
 
 chdir $here;
 
-ok `$^X -I$lib project-root/bin/status` =~ /SUCCESS/ms;
+ok `$^X -I$lib project-root/bin/status` =~ /OK/ms;
 
 $project_root->scan_tree (sub {
 	my $f = shift;
@@ -156,7 +155,9 @@ $project_root->scan_tree (sub {
 	return 1;
 });
 
-$project_root->rm_tree;
+if (eval {`whoami`} ne 'apla') {
+	$project_root->rm_tree;
+}
 
 exit;
 

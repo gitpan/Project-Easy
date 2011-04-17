@@ -2,6 +2,8 @@ package Project::Easy::Helper;
 
 use Class::Easy;
 
+use Project::Easy::Config::File;
+
 sub config {
 	
 	my @params = @ARGV;
@@ -10,15 +12,46 @@ sub config {
 	
 	my ($package, $libs) = &_script_wrapper(); # Project name and "libs" path
 	
-	my $core   = $package->singleton;  # Project singleton
+	my $core   = $::project;  # Project singleton
 	my $config = $core->config;
 	
 	my $templates = file->__data__files ();   # Got all "data files" at end of file
+	
+	# Local config absolute path
+	my $config_file  = $core->fixup_path_instance ($core->instance);
+	my @config_serializer = ();
+	
+	# first, we need to detect scope of config
+	if ($params[0] =~ /--(project|global)/) {
+		shift @params;
+		
+		# Global config absolute path
+		$config_file = $core->conf_path;
+		push @config_serializer, 'undef_keys_in_patch';
+	} elsif ($params[0] =~ /-{1,2}f(?:ile)?/) {
+		shift @params;
+		$config_file = Project::Easy::Config::File->new (shift @params);
+		
+		# try to load config
+		local $@;
+		$config = eval {$config_file->deserialize;};
+		die "config file ($config_file) access error: $!"
+			if $!;
 
+		die "config file ($config_file) cannot be deserialized"
+			if $@;
+	}
+	
 	my ($key, $command, @remains) = @params;
 	
 	unless (defined $key) {
+		print "requested config file name is: ", $config_file, "\n";
 		print $templates->{'config-usage'}, "\n";
+		return;
+	}
+	
+	if ($key eq '-e') {
+		system ($ENV{EDITOR}, $config_file);
 		return;
 	}
 	
@@ -52,7 +85,7 @@ sub config {
 	my $serializer_json = $conf_package->serializer ('json');
 	
 	if ($command =~ /^(?:--)?dump$/) {
-		print "'$key' => ";
+		print "\"$key\" => ";
 		print $serializer_json->dump_struct ($struct);
 		print "\n";
 		return 1;
@@ -89,16 +122,8 @@ sub config {
         
 		
 		# storing modified config
-
-		# Global config absolute path
-		my $global_config_file = $core->conf_path;
-		$global_config_file->patch ($fixup_struct, 'undef_keys_in_patch');
-        #warn(Dumper($global_config_file->contents));
-		
-        # Local config absolute path
-		my $local_config_file  = $core->fixup_path_distro ($core->distro);
-		$local_config_file->patch ($fixup_struct);
-        #warn(Dumper($local_config_file->contents));
+		$config_file->patch ($fixup_struct, @config_serializer);
+        #warn(Dumper($config_file->contents));
 
 		return 1;
 	}
@@ -110,3 +135,6 @@ sub config {
 
 
 1;
+
+__DATA__
+

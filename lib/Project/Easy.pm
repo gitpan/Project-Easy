@@ -1,6 +1,6 @@
 package Project::Easy;
 
-use Class::Easy;
+use Class::Easy::Base;
 use IO::Easy;
 
 unless ($^O eq 'MSWin32') {
@@ -9,7 +9,7 @@ unless ($^O eq 'MSWin32') {
 
 # these constants must be available prior to the helper use
 BEGIN {
-	our $VERSION = '0.29';
+	our $VERSION = '0.30';
 
 	has etc => 'etc'; # conf, config
 	has bin => 'bin'; # scripts, tools
@@ -26,21 +26,23 @@ sub singleton {
 	return $singleton;
 }
 
-has 'daemons', default => {};
+has daemons => {};
 
-has 'daemon_package', default => 'Project::Easy::Daemon';
-has 'db_package',     default => 'Project::Easy::DB';
-has 'conf_package',   default => 'Project::Easy::Config';
+has daemon_package => 'Project::Easy::Daemon';
+has db_package     => 'Project::Easy::DB';
+has conf_package   => 'Project::Easy::Config';
 
 sub import {
 	my $pack = shift;
 	my @params = @_;
 	
-	if (scalar grep {$_ eq 'script'} @params) {
+	my $caller = caller;
+	
+	if (scalar grep {$_ eq 'script'} @params or $caller eq 'main') {
 		Project::Easy::Helper::_script_wrapper;
 
 		Class::Easy->import;
-		IO::Easy->import;
+		IO::Easy->import (qw(project));
 	
 	} elsif (scalar grep {$_ eq 'project'} @params) {
 		Project::Easy::Helper::_script_wrapper (undef, 1);
@@ -59,7 +61,7 @@ sub init {
 	
 	my $root = dir ($class->lib_path)->parent;
 
-	make_accessor ($class, 'root', default => $root);
+	make_accessor ($class, root => $root);
 	
 	my $conf_path = $root->append ($class->etc, $class->id . '.' . $class->conf_format)->as_file;
 	
@@ -69,7 +71,7 @@ sub init {
 	# blessing for functionality extension: serializer
 	$conf_path = bless ($conf_path, 'Project::Easy::Config::File');
 
-	make_accessor ($class, 'conf_path', default => $conf_path);
+	make_accessor ($class, conf_path => $conf_path);
 	
 }
 
@@ -111,7 +113,7 @@ sub instantiate {
 		}
 		
 
-		make_accessor ($class, "db_$datasource", default => sub {
+		make_accessor ($class, "db_$datasource" => sub {
 			return $class->db ($datasource);
 		});
 	}
@@ -133,7 +135,7 @@ sub instantiate {
 				$d = $d_pack->new ($singleton, $d_name, $d_conf);
 			}
 			
-			
+			$d->create_script_file ($class->root);
 			
 			$singleton->daemons->{$d_name} = $d;
 		}
@@ -147,31 +149,40 @@ sub detect_environment {
 	
 	my $root = $class->root;
 	
-	my $distro_path = $root->append ('var', 'distribution');
+	my $distro_path   = $root->append ('var', 'distribution');
+	my $instance_path = $root->append ('var', 'instance');
+	
+	if (-f $distro_path and ! -f $instance_path) {
+		rename $distro_path, $instance_path
+	}
 	
 	my @fixups = ();
-	$root->dir_io ($class->etc)->scan_tree (sub {my $f = shift; push @fixups, $f->name if -d $f});
+	$root->dir_io ($class->etc)->scan_tree (sub {
+		my $f = shift;
+		push @fixups, $f->name
+			if -d $f;
+	});
 	
-	my $ending = ". probably you want to set " 
-		. $distro_path->abs_path . ' contents to fixup config dir (available fixups: '
+	my $ending = ".\nprobably you want to set '" 
+		. $instance_path->rel_path (dir->current) . '\' contents to fixup config dir name (available fixups: '
 		. join (', ', @fixups).")\n";
 	
-	die "distribution file not found" . $ending
-		unless -f $distro_path;
+	die "instance file not found" . $ending
+		unless -f $instance_path;
 	
-	my $distro_string = $distro_path->as_file->contents;
+	my $instance_string = $instance_path->as_file->contents;
 	
-	chomp $distro_string;
+	$instance_string =~ s/[\s\n\t\r]+$//;
 
-	die "can't recognise distribution '$distro_string'" . $ending
-		unless $distro_string;
+	die "can't recognise instance name '$instance_string'" . $ending
+		unless $instance_string;
 	
-	my ($distro, $fixup_core) = split (/:/, $distro_string, 2);
+	my ($instance, $fixup_core) = split (/:/, $instance_string, 2); # windows workaround
 	
-	make_accessor ($class, 'distro', default => $distro);
+	make_accessor ($class, 'instance', default => $instance);
 	make_accessor ($class, 'fixup_core', default => $fixup_core);
 	
-	my $fixup_path = $class->fixup_path_distro;
+	my $fixup_path = $class->fixup_path_instance;
 
 	die "can't locate fixup config file at '$fixup_path'" . $ending
 		unless -f $fixup_path;
@@ -180,18 +191,18 @@ sub detect_environment {
 	
 }
 
-sub fixup_path_distro {
+sub fixup_path_instance {
 	my $self   = shift;
-	my $distro = shift || $self->distro;
+	my $instance = shift || $self->instance;
 	
 	my $fixup_core = $self->fixup_core;
 	
 	my $fixup_path;
 	
 	if (defined $fixup_core and $fixup_core) {
-		$fixup_path = IO::Easy->new ($fixup_core)->append ($distro);
+		$fixup_path = IO::Easy->new ($fixup_core)->append ($instance);
 	} else {
-		$fixup_path = $self->root->append ($self->etc, $distro);
+		$fixup_path = $self->root->append ($self->etc, $instance);
 	}
 	
 	$fixup_path = $fixup_path->append ($self->id . '.' . $self->conf_format)->as_file;
@@ -202,13 +213,13 @@ sub fixup_path_distro {
 sub config {
 	my $class = shift;
 	
-	if (@_ > 0) { # get config for another distro, do not cache
+	if (@_ > 0) { # get config for another instance, do not cache
 		my $config = $class->conf_package->parse (
 			$singleton, @_
 		);
 		
 		# reparse config
-		if ($_[0] eq $class->distro) {
+		if ($_[0] eq $class->instance) {
 			$singleton->{config} = $config
 		}
 		
@@ -475,9 +486,9 @@ has 'bin', default => 'bin';
 
 IO::Easy object for project root directory
 
-=item distro
+=item instance
 
-string contains current distribution name
+string contains current project instance name
 
 =item fixup_core
 

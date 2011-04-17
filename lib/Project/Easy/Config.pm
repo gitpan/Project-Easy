@@ -8,12 +8,12 @@ our @curr_patch_config_path = ();
 #sub patch ($$);
 
 sub parse {
-	my $class  = shift;
-	my $core   = shift;
-	my $distro = shift;
+	my $class    = shift;
+	my $core     = shift;
+	my $instance = shift;
 	
 	my $path  = $core->conf_path;
-	my $fixup = $core->fixup_path_distro ($distro);
+	my $fixup = $core->fixup_path_instance ($instance);
 	
 	# TODO: replace to real splitpath and join '/' for windows users
 	my $root_path = $core->root->path;
@@ -23,7 +23,7 @@ sub parse {
 	my $expansion = {
 		root   => $root_path,
 		id     => $core->id,
-		distro => $core->distro,
+		instance => $core->instance,
 	};
 	
 	my $conf = $path->deserialize ($expansion);

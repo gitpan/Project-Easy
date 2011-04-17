@@ -10,6 +10,7 @@ sub new {
 	my $json = JSON->new;
 	$json->utf8 (1);
 	$json->pretty (1);
+	$json->convert_blessed (1);
 	
 	bless {worker => $json}, $class;
 }

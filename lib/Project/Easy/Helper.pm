@@ -17,6 +17,11 @@ use Project::Easy::Helper::Console;
 
 our @scriptable = (qw(status config updatedb console));
 
+my $is_colored = 0;
+
+$is_colored = 1
+	if try_to_use ('Term::ANSIColor');
+
 sub ::initialize {
 	my $params = \@_;
 	$params = \@ARGV
@@ -49,7 +54,7 @@ sub ::initialize {
 
 	my $login = eval {scalar getpwuid ($<)};
 
-	my $distribution = 'local' . (defined $login ? ".$login" : '');
+	my $instance = 'local' . (defined $login ? ".$login" : '');
 	
 	my $root = dir->current;
 	
@@ -68,11 +73,11 @@ sub ::initialize {
 	
 	# ok, project skeleton created. now we need to create config
 	my $etc = $root->append ('etc')->as_dir;
-	$etc->append ($distribution)->as_dir->create;
+	$etc->append ($instance)->as_dir->create;
 	
 	# TODO: store database config
 	$etc->append ("$project_id.json")->as_file->store_if_empty ('{}');
-	$etc->append ($distribution, "$project_id.json")->as_file->store_if_empty ('{}');
+	$etc->append ($instance, "$project_id.json")->as_file->store_if_empty ('{}');
 	
 	$etc->append ('project-easy')->as_file->store_if_empty ("#!/usr/bin/perl
 package LocalConf;
@@ -86,8 +91,8 @@ our \@paths = qw(
 	
 	my $var = create_var ($root);
 	
-	my $distro = $var->append ('distribution')->as_file;
-	$distro->store_if_empty ($distribution);
+	my $instance_file = $var->append ('instance')->as_file;
+	$instance_file->store_if_empty ($instance);
 
 	my $t = $root->append ('t')->as_dir;
 	$t->create;
@@ -112,7 +117,7 @@ our \@paths = qw(
 	config (qw(db.default.attributes.dbname = ), '{$root}/var/test.sqlite');
 	config (qw(db.default.update =), "$schema_file");
 	
-	$namespace->config ($distribution);
+	$namespace->config ($instance);
 	
 	update_schema (
 		mode => 'install'
@@ -142,6 +147,10 @@ sub create_scripts {
 		
 	}
 
+}
+
+sub helping_hand {
+	
 }
 
 sub create_entity {
@@ -209,9 +218,9 @@ sub shell {
 	
 	my $core = $pack->singleton;
 	
-	my $distro = $ARGV[0];
+	my $instance = $ARGV[0];
 	
-	my $conf  = $core->config ($distro);
+	my $conf  = $core->config ($instance);
 	my $sconf = $conf->{shell};
 	
 	unless (try_to_use 'Net::SSH::Perl' and try_to_use 'Term::ReadKey') {
@@ -374,7 +383,7 @@ $class->instantiate;
 # IO::Easy::File script.template
 ########################################
 
-#!/usr/bin/perl
+#!/usr/bin/env perl
 use Class::Easy;
 use Project::Easy::Helper;
 &Project::Easy::Helper::{$script_name};
@@ -403,7 +412,6 @@ sub _init_db {
 # IO::Easy::File template
 ########################################
 
-
 ########################################
 # IO::Easy::File config-usage
 ########################################
@@ -413,7 +421,7 @@ Usage:  db.<database_id> template db.<template_name>	OR
 		db.<database_id>.username
 
 Example (add new database config "local_test_db_id" with mysql template) :
-./bin/config db.local_test_db_id template db.mysql
+bin/config db.local_test_db_id template db.mysql
 
 ########################################
 # IO::Easy::File template-db.sqlite
@@ -474,7 +482,7 @@ Example (add new database config "local_test_db_id" with mysql template) :
 	},
 	"do_after_connect" : [
 		"alter session set nls_date_format='yyyy-mm-dd hh24:mi:ss'"
-	],
+	]
 }
 
 ########################################
@@ -493,3 +501,4 @@ Example (add new database config "local_test_db_id" with mysql template) :
 		"ShowErrorStatement": 1
 	}
 }
+

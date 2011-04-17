@@ -5,17 +5,19 @@ use IO::Easy;
 
 use POSIX ();
 
+use Project::Easy::Config;
+
 has 'pid_file';
 has 'code';
 
 sub new {
-	my $class     = shift;
-	my $singleton = shift;
-	my $code      = shift;
-	my $config    = shift;
+	my $class  = shift;
+	my $core   = shift;
+	my $code   = shift;
+	my $config = shift;
 	
-	my $root = $singleton->root;
-	my $id   = $singleton->id;
+	my $root = $core->root;
+	my $id   = $core->id;
 	
 	if (defined $config->{pid_file}) {
 		$config->{pid_file} = file ($config->{pid_file});
@@ -36,7 +38,27 @@ sub new {
 }
 
 sub startup_script {
+	my $self = shift;
 	
+	
+}
+
+sub create_script_file {
+	my $self = shift;
+	my $root = shift;
+	
+	my $script = $root->file_io ('bin', 'daemon_'.$self->code);
+	
+	my $data_files = file->__data__files ();
+	
+	my $script_text = Project::Easy::Config::string_from_template (
+		$data_files->{script},
+		{
+			daemon_code => $self->code
+		}
+	);
+	
+	$script->store ($script_text);
 }
 
 sub launch {
@@ -110,6 +132,8 @@ sub launch {
 		print "starting daemon by: $httpd_bin -f $conf_file\n";
 		`$httpd_bin -f $conf_file`;
 		
+	} else {
+		die "you must define daemon package or bin file";
 	}
 	
 	
@@ -227,9 +251,71 @@ sub process_command {
 	
 }
 
+sub TO_JSON {
+	my $self = shift;
+	
+	my $result = {map {$_ => $self->{$_}} keys %$self};
+	$result->{pid_file} = $result->{pid_file}->path;
+	$result->{log_file} = $result->{log_file}->path;
+	
+	$result;
+}
+
 1;
 
 __DATA__
+
+########################
+# IO::Easy script
+########################
+
+#!/usr/bin/env perl
+
+use Project::Easy qw(script);
+
+use Getopt::Long qw(:config auto_version auto_help);
+
+my $o = {
+	verbose => '',
+	detach  => 1
+};
+
+GetOptions (
+	$o,
+	'verbose!',
+	'detach!'
+);
+
+my $command = $ARGV[0];
+
+my $instance = $::project->instance;
+
+print "project '".$::project->id."' using instance: '$instance'\n";
+
+Project::Easy::Helper::status ();
+
+# die $o->{verbose};
+
+if ($o->{verbose}) {
+	logger (default => *STDERR);
+}
+
+my $launch_method = 'launch';
+unless ($o->{detach}) {
+	$launch_method = '_launched';
+}
+
+my $daemon = $::project->daemon ('{$daemon_code}');
+
+print 'process id ' . ($daemon->pid || '[undef]') . ' is' . (
+	$daemon->running
+	? ''
+	: ' not'
+) . " running\n";
+
+exit unless $command;
+
+$daemon->process_command ($command);
 
 ########################
 # IO::Easy startup.linux
